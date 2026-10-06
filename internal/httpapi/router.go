@@ -7,16 +7,9 @@ import "net/http"
 // frontend — собранный интерфейс; nil означает «фронт не отдаём»,
 // так роутер поднимается в тестах без вшитой сборки.
 func NewRouter(auth *Auth, sse *Events, registry *Registry, frontend http.Handler,
-	requests *Requests, settings *Settings, update *Update, uiLicense string,
+	requests *Requests, settings *Settings, update *Update,
 ) http.Handler {
 	mux := http.NewServeMux()
-
-	// Ключ лицензии PrimeUI нужен интерфейсу до входа (страница входа тоже
-	// на PrimeVue), поэтому без сессии. Он и так виден любому, кто открыл
-	// страницу: раньше он лежал прямо в бандле.
-	mux.HandleFunc("GET /api/ui-config", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"primeuiLicense": uiLicense})
-	})
 
 	// Версия открыта без сессии: по ней страница после обновления ждёт, пока
 	// поднимется новая сборка.

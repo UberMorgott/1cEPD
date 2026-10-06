@@ -26,10 +26,6 @@ type Config struct {
 	// CookieSecure выключается только для локального запуска по http:
 	// браузер не сохраняет cookie с флагом Secure на незащищённом соединении.
 	CookieSecure bool
-	// PrimeUILicense — ключ Community-лицензии PrimeUI (PRIMEUI_LICENSE).
-	// Необязателен: без него интерфейс рисует плашку о лицензии. Живёт в .env,
-	// а не в сборке, чтобы ключ не попадал в репозиторий и в релизы.
-	PrimeUILicense string
 }
 
 // Getter возвращает значение переменной окружения. Отдельный тип, чтобы тесты
@@ -44,9 +40,7 @@ func Load(get Getter) (Config, error) {
 		PartnerCode:        get("PARTNER_CODE"),
 		AppLogin:           get("APP_LOGIN"),
 		DBPath:             orDefault(get("DB_PATH"), "./data/app.db"),
-		ListenAddr:         orDefault(get("LISTEN_ADDR"), "127.0.0.1:8080"),
-		PrimeUILicense:     strings.TrimSpace(get("PRIMEUI_LICENSE")),
-	}
+		ListenAddr:         orDefault(get("LISTEN_ADDR"), "127.0.0.1:8080")}
 
 	required := map[string]string{
 		"PARTNER_API_LOGIN":    cfg.PartnerAPILogin,

@@ -128,7 +128,7 @@ func run() error {
 	}, cancel)
 
 	router := httpapi.NewRouter(auth, httpapi.NewEvents(bus), registryAPI, frontend,
-		requestsAPI, httpapi.NewSettings(settingsStore), httpapi.NewUpdate(updates), cfg.PrimeUILicense)
+		requestsAPI, httpapi.NewSettings(settingsStore), httpapi.NewUpdate(updates))
 
 	go runDailyJobs(ctx, snapshotService, sessions, itsRefresher, epdRefresher, monthRefresher, subscriberRefresher)
 	go runBackfill(ctx, backfill)

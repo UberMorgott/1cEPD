@@ -3,31 +3,10 @@ import { createPinia } from 'pinia'
 import PrimeVue from 'primevue/config'
 import Aura from '@primeuix/themes/aura'
 import { definePreset } from '@primeuix/themes'
-import { registerLicense } from '@primeui/license-manager'
 import 'primeicons/primeicons.css'
 
 import App from './App.vue'
 import router from './router'
-
-/**
- * Ключ Community-лицензии PrimeUI.
- *
- * Проверка офлайновая, без обращений наружу. Без ключа библиотека рисует
- * поверх страницы плашку о неверной лицензии.
- *
- * Ключ берётся у сервера (PRIMEUI_LICENSE в .env) при старте страницы, а не
- * вшивается в сборку: так его нет ни в репозитории, ни в опубликованных релизах.
- */
-async function loadLicense() {
-  try {
-    const response = await fetch('/api/ui-config', { credentials: 'same-origin' })
-    if (!response.ok) return
-    const { primeuiLicense } = (await response.json()) as { primeuiLicense?: string }
-    if (primeuiLicense) registerLicense({ primeui: primeuiLicense })
-  } catch {
-    // Сервер не ответил — страница работает и без ключа, с плашкой.
-  }
-}
 
 /**
  * Приложение только тёмное: класс стоит в index.html, здесь подстраховка
@@ -96,8 +75,6 @@ const preset = definePreset(Aura, {
     },
   },
 })
-
-await loadLicense()
 
 createApp(App)
   .use(createPinia())

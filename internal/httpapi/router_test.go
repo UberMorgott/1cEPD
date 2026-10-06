@@ -23,7 +23,7 @@ func testRouter(t *testing.T) http.Handler {
 
 	hash, _ := bcrypt.GenerateFromPassword([]byte("пароль"), bcrypt.DefaultCost)
 	auth := NewAuth(store.NewSessions(db), "admin", string(hash), time.Hour, true)
-	return NewRouter(auth, NewEvents(events.NewBus()), nil, nil, nil, nil, nil, "")
+	return NewRouter(auth, NewEvents(events.NewBus()), nil, nil, nil, nil, nil)
 }
 
 func TestHealthIsPublic(t *testing.T) {
