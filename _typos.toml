@@ -1,0 +1,4 @@
+# Built output is minified third-party code, not our spelling: `npm run build`
+# regenerates web/dist, so a "typo" there cannot be fixed in this repository.
+[files]
+extend-exclude = ["web/dist/"]

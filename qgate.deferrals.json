@@ -1,0 +1,6 @@
+{"dependencies": [
+  {"name": "typescript", "until": "2026-12-01", "reason": "typescript-eslint отказывается грузиться на API TS 7.0, поддержка ожидается в 7.1 -- typescript-eslint/typescript-eslint#10940"}
+],
+"vulnerabilities": [
+  {"id": "GHSA-vfj7-8cjw-p6xm", "until": "2026-11-06", "reason": "braces 3.0.3 -- последняя версия, исправления нет; dev-only через stylelint > micromatch, в сборку не попадает"}
+]}

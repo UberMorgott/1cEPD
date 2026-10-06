@@ -1,0 +1,170 @@
+{
+  "reportUeid": "00000000-0000-0000-0000-000000000001",
+  "state": "OK",
+  "completedDate": "2026-09-02T13:45:57Z",
+  "report": {
+    "entries": [
+      {
+        "subscriberCode": "FR-FR-631227",
+        "tariffs": [
+          {
+            "name": "ИТСааС ПРОФ",
+            "publicSubscriptionTypeNumber": null,
+            "buyDate": "2025-08-21T21:00:00Z",
+            "userOrganizationName": "ООО \"Тестовая организация 20\"",
+            "userOrganizationInn": "0783896053",
+            "userOrganizationKpp": "435453217",
+            "startDate": "2025-08-25T21:00:00Z",
+            "endDate": "2027-08-25T20:59:59Z",
+            "options": [
+              {
+                "name": "Лицензия для сдачи отчетности одного юридического лица или ИП во все контролирующие органы",
+                "quantitative": true,
+                "maxVolume": 1,
+                "usedVolume": 1
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "subscriberCode": "FR-FR-908757",
+        "tariffs": [
+          {
+            "name": "ИТСааС ПРОФ",
+            "publicSubscriptionTypeNumber": null,
+            "buyDate": "2026-07-19T21:00:00Z",
+            "userOrganizationName": "ООО \"Тестовая организация 8\"",
+            "userOrganizationInn": "6507808010",
+            "userOrganizationKpp": "400000272",
+            "startDate": "2026-07-20T21:00:00Z",
+            "endDate": "2027-07-20T20:59:59Z",
+            "options": [
+              {
+                "name": "Лицензия для сдачи отчетности одного юридического лица или ИП во все контролирующие органы",
+                "quantitative": true,
+                "maxVolume": 1,
+                "usedVolume": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "subscriberCode": "FR-FR-248104",
+        "tariffs": [
+          {
+            "name": "ИТСааС ПРОФ",
+            "publicSubscriptionTypeNumber": null,
+            "buyDate": "2025-11-23T21:00:00Z",
+            "userOrganizationName": "ООО \"Тестовая организация 14\"",
+            "userOrganizationInn": "6899333148",
+            "userOrganizationKpp": "616386851",
+            "startDate": "2025-12-31T21:00:00Z",
+            "endDate": "2026-12-31T20:59:59Z",
+            "options": [
+              {
+                "name": "Лицензия для сдачи отчетности одного юридического лица или ИП во все контролирующие органы",
+                "quantitative": true,
+                "maxVolume": 1,
+                "usedVolume": 1
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "subscriberCode": "CL-265928",
+        "tariffs": [
+          {
+            "name": "1С:ИТС уровня ПРОФ",
+            "publicSubscriptionTypeNumber": 161,
+            "buyDate": "2024-12-16T10:16:04Z",
+            "userOrganizationName": "ООО \"Тестовая организация 21\"",
+            "userOrganizationInn": "5702418878",
+            "userOrganizationKpp": "435453217",
+            "startDate": "2024-12-31T21:00:00Z",
+            "endDate": "2026-12-31T20:59:59Z",
+            "options": [
+              {
+                "name": "Лицензия для сдачи отчетности одного юридического лица или ИП во все контролирующие органы",
+                "quantitative": true,
+                "maxVolume": 1,
+                "usedVolume": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "subscriberCode": "CL-475819",
+        "tariffs": [
+          {
+            "name": "1С:ИТС уровня ПРОФ",
+            "publicSubscriptionTypeNumber": 2003,
+            "buyDate": "2026-08-18T09:33:57Z",
+            "userOrganizationName": "ООО \"Тестовая организация 9\"",
+            "userOrganizationInn": "9600855269",
+            "userOrganizationKpp": "519582564",
+            "startDate": "2026-08-31T21:00:00Z",
+            "endDate": "2027-08-31T20:59:59Z",
+            "options": [
+              {
+                "name": "Лицензия для сдачи отчетности одного юридического лица или ИП во все контролирующие органы",
+                "quantitative": true,
+                "maxVolume": 1,
+                "usedVolume": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "subscriberCode": "FR-FR-940035",
+        "tariffs": [
+          {
+            "name": "ИТСааС ПРОФ",
+            "publicSubscriptionTypeNumber": null,
+            "buyDate": "2026-04-02T21:00:00Z",
+            "userOrganizationName": "ООО \"Тестовая организация 15\"",
+            "userOrganizationInn": "6200288697",
+            "userOrganizationKpp": "642277512",
+            "startDate": "2026-04-12T21:00:00Z",
+            "endDate": "2026-10-12T20:59:59Z",
+            "options": [
+              {
+                "name": "Лицензия для сдачи отчетности одного юридического лица или ИП во все контролирующие органы",
+                "quantitative": true,
+                "maxVolume": 1,
+                "usedVolume": 1
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "subscriberCode": "FR-FR-752742",
+        "tariffs": [
+          {
+            "name": "ИТСааС ПРОФ",
+            "publicSubscriptionTypeNumber": null,
+            "buyDate": "2025-11-10T21:00:00Z",
+            "userOrganizationName": "ООО \"Тестовая организация 10\"",
+            "userOrganizationInn": "3343702046",
+            "userOrganizationKpp": "606985415",
+            "startDate": "2025-11-15T21:00:00Z",
+            "endDate": "2026-11-15T20:59:59Z",
+            "options": [
+              {
+                "name": "Лицензия для сдачи отчетности одного юридического лица или ИП во все контролирующие органы",
+                "quantitative": true,
+                "maxVolume": 1,
+                "usedVolume": 0
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

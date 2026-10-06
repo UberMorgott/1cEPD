@@ -1,0 +1,1 @@
+function e(e){let t=e||`dev`;return/^\d+\.\d+\.\d+/.test(t)?`v${t}`:t}function t(e,t){return!t||t<=0?null:Math.min(100,Math.floor((e??0)*100/t))}function n(e){return((e??0)/(1<<20)).toFixed(1)}function r(e,t){return!!t?.version&&t.version!==e}export{e as i,n,r,t};

@@ -1,0 +1,51 @@
+# --- секреты и локальные настройки: .env держит пароли API и ключ лицензии ---
+.env
+.env.*
+!.env.example
+!web/.env.example
+
+# --- данные: база, журналы, выгрузки клиентов ---
+*.db
+*.db-*
+*.db.*
+*.sqlite
+*.sqlite*
+data/
+*.log
+*.err
+logs/
+/*.csv
+/*.xls
+/*.xlsx
+exports/
+
+# --- сборка ---
+# web/dist остаётся в репозитории: его вшивает //go:embed all:dist из
+# web/embed.go, и без него `go build` на чистом клоне не соберётся.
+dist/
+!web/dist/
+build/
+bin/
+*.exe
+*.exe~
+*.dll
+*.test
+*.out
+coverage*
+
+# --- картинки: в репозиторий только явно нужные ---
+*.jpg
+*.jpeg
+*.png
+
+# --- инструменты и редакторы ---
+node_modules/
+.aegis/
+.serena/
+.claude/*
+!.claude/settings.json
+.claude/settings.local.json
+.vscode/
+!web/.vscode/
+.idea/
+web/.cache/

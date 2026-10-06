@@ -1,0 +1,15 @@
+{
+  "extends": [
+    "stylelint-config-standard-scss",
+    "stylelint-config-recommended-vue/scss"
+  ],
+  "ignoreFiles": ["dist/**", "coverage/**", ".cache/**"],
+  "overrides": [
+    {
+      "files": ["src/styles/*.css"],
+      "rules": {
+        "selector-pseudo-class-no-unknown": [true, { "ignorePseudoClasses": ["deep"] }]
+      }
+    }
+  ]
+}

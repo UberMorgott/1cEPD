@@ -1,0 +1,183 @@
+/* Оформление PrimeVue для экранов: подключается как <style scoped src>, поэтому
+   правила обёрнуты в :deep — дотягиваются до разметки компонентов. */
+
+/* Таблица без обёртки: приглушённая шапка, разделители строк. */
+:deep(.p-datatable-thead > tr > th) {
+  padding: 10px 12px;
+  background: var(--ui-bg-panel-hover);
+  border-width: 0 0 1px;
+  border-color: var(--ui-border);
+  color: var(--ui-text-highlighted);
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: none;
+}
+
+:deep(.p-datatable-tbody > tr) {
+  background: var(--ui-bg);
+  color: var(--ui-text);
+}
+
+:deep(.p-datatable-tbody > tr > td) {
+  padding: 10px 12px;
+  border-width: 0 0 1px;
+  border-color: var(--ui-border);
+  font-size: 14px;
+}
+
+:deep(.p-datatable-tbody > tr:last-child > td) {
+  border-bottom-width: 0;
+}
+
+:deep(.p-datatable-tbody > tr:hover) {
+  background: var(--ui-bg-panel-hover);
+}
+
+/* Строка с данными кликабельна целиком; раскрытая подробность — нет. */
+:deep(.p-datatable-tbody > tr:not(.p-datatable-row-expansion)) {
+  cursor: pointer;
+}
+
+:deep(.p-datatable-row-expansion > td) {
+  background: var(--ui-bg-panel-hover);
+}
+
+:deep(.num) {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Статусы — тонированные пилюли вместо сплошной заливки. */
+:deep(.p-tag) {
+  --tone: var(--ui-info);
+
+  padding: 2px 8px;
+  border-radius: var(--ui-radius-md);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  background: color-mix(in oklab, var(--tone) 12%, var(--ui-bg));
+  color: var(--tone);
+}
+
+:deep(.p-tag-danger) {
+  --tone: var(--ui-error);
+}
+
+:deep(.p-tag-warn) {
+  --tone: var(--ui-warning);
+}
+
+:deep(.p-tag-success) {
+  --tone: var(--ui-success);
+}
+
+:deep(.p-tag-secondary) {
+  --tone: var(--ui-text-muted);
+}
+
+:deep(.p-progressbar) {
+  background: var(--ui-bg-accented);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+:deep(.p-progressbar-value) {
+  background: var(--ui-primary);
+}
+
+:deep(.p-button) {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--ui-primary);
+  border-radius: var(--ui-radius-md);
+  background: var(--ui-primary);
+  color: var(--ui-bg);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+:deep(.p-button:not(:disabled):hover) {
+  background: var(--ui-primary-hover);
+  border-color: var(--ui-primary-hover);
+  color: var(--ui-bg);
+}
+
+:deep(.p-button.p-button-icon-only) {
+  width: 32px;
+  padding: 0;
+}
+
+:deep(.p-button.p-button-sm) {
+  height: 32px;
+  font-size: 14px;
+}
+
+:deep(.p-button.p-button-text),
+:deep(.p-button.p-button-outlined),
+:deep(.p-button.p-button-secondary) {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ui-text-muted);
+}
+
+:deep(.p-button.p-button-outlined),
+:deep(.p-button.p-button-secondary) {
+  border-color: var(--ui-border);
+  background: var(--ui-bg);
+  color: var(--ui-text);
+}
+
+:deep(.p-button.p-button-text:not(:disabled):hover),
+:deep(.p-button.p-button-outlined:not(:disabled):hover),
+:deep(.p-button.p-button-secondary:not(:disabled):hover) {
+  background: var(--ui-bg-panel-hover);
+  color: var(--ui-text);
+}
+
+:deep(.p-inputtext) {
+  height: 32px;
+  padding: 0 10px;
+  background: var(--ui-bg);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-md);
+  font-size: 14px;
+  color: var(--ui-text);
+}
+
+:deep(.p-inputtext::placeholder) {
+  color: var(--ui-text-dimmed);
+}
+
+:deep(.p-inputtext:enabled:focus) {
+  border-color: var(--ui-primary);
+  box-shadow: none;
+  outline: none;
+}
+
+:deep(.p-message) {
+  --tone: var(--ui-info);
+
+  margin: 0;
+  border: 1px solid color-mix(in oklab, var(--tone) 35%, transparent);
+  border-radius: var(--ui-radius-lg);
+  background: color-mix(in oklab, var(--tone) 12%, var(--ui-bg));
+  color: var(--tone);
+  font-size: 14px;
+}
+
+:deep(.p-message-error) {
+  --tone: var(--ui-error);
+}
+
+:deep(.p-message-warn) {
+  --tone: var(--ui-warning);
+}
+
+:deep(.p-message-success) {
+  --tone: var(--ui-success);
+}
+
+:deep(.p-message-content) {
+  padding: 10px 12px;
+}
