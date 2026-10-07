@@ -20,6 +20,7 @@ import {
   requestState,
   requestStateLabels,
 } from '../requestFile'
+import { issueVisible, orphanVisible, requiredFields } from '../fieldVisibility'
 import { autoMainReg, autoRegCandidates, extraRegOptions, regOptions as regOptionList } from '../regChoice'
 import {
   api,
@@ -162,7 +163,7 @@ const defaultTitle = computed(
  * 0 — шапка, 1 — строка таблицы. Без номера — замечания с любой строки.
  */
 function issuesFor(field: string, row?: number): ItsIssue[] {
-  return issues.value.filter(
+  return visibleIssues.value.filter(
     (issue) => issue.field === field && (row === undefined || issue.row === row),
   )
 }
@@ -279,7 +280,10 @@ async function loadSavedInfo() {
 async function download() {
   notice.value = ''
   await check()
-  if (blocking.value) return
+  if (blocking.value) {
+    await revealErrors()
+    return
+  }
   const request = outgoing()
   const failed = await downloadRequestFile(request)
   if (failed) {
@@ -300,7 +304,10 @@ const recipients = ref<string[]>([])
 
 async function askSend() {
   await check()
-  if (blocking.value) return
+  if (blocking.value) {
+    await revealErrors()
+    return
+  }
   try {
     recipients.value = (await api.settings()).mailTo ?? []
   } catch {
@@ -412,6 +419,8 @@ async function openRequest(id: number, copy = false) {
     else if (!form.value.password && sender.value) form.value.password = sender.value.password
     title.value = copy ? defaultTitle.value : draft.title
     savedId.value = copy ? 0 : draft.id
+    // Сохранённый черновик — не новая заявка: его замечания видны сразу.
+    resetVisibility(!copy)
     revision.value = copy ? 0 : draft.revision
     innMatches.value = []
     checked.value = null
@@ -441,15 +450,80 @@ function fieldKey(issue: ItsIssue): string {
 /** Поля шапки — отправителя заявки из настроек. */
 const senderKeys = new Set(['partnerCode', 'responsible:0', 'email:0', 'password', 'newPassword'])
 
+/**
+ * Видимость замечаний: новая заявка не встречает красным. Пустое нетронутое поле
+ * молчит до попытки скачать или отправить; черновик и неверные подставленные
+ * значения видны сразу.
+ */
+const revealed = ref(false)
+const touched = ref(new Set<string>())
+const focusedKey = ref<string | null>(null)
+
+function resetVisibility(reveal: boolean) {
+  revealed.value = reveal
+  touched.value = new Set()
+}
+
+/** Значение поля по ключу data-field: у шапки и строки есть одноимённые поля. */
+function fieldValue(key: string): unknown {
+  if (key === 'responsible:0') return form.value.responsible
+  if (key === 'email:0') return form.value.email
+  if (key === 'responsible:1') return row.value.responsible
+  if (key === 'email:1') return row.value.email
+  if (key === 'partnerCode' || key === 'password' || key === 'newPassword') return form.value[key]
+  return (row.value as unknown as Record<string, unknown>)[key]
+}
+
+function fieldOf(event: FocusEvent): string | null {
+  return (event.target as HTMLElement | null)?.closest<HTMLElement>('[data-field]')?.dataset.field ?? null
+}
+function onFocusIn(event: FocusEvent) {
+  focusedKey.value = fieldOf(event)
+}
+function onFocusOut(event: FocusEvent) {
+  const key = fieldOf(event)
+  if (!key) return
+  if (focusedKey.value === key) focusedKey.value = null
+  if (!touched.value.has(key)) touched.value = new Set(touched.value).add(key)
+}
+
+const visibleIssues = computed(() => {
+  const state = { revealed: revealed.value, touched: touched.value, focused: focusedKey.value, value: fieldValue }
+  const current = row.value
+  const clientInputs = [current.inn, current.regNumber, current.ownerCode, current.login]
+  return issues.value.filter((issue) => {
+    const key = fieldKey(issue)
+    if (!inlineKeys.value.has(key)) return orphanVisible(revealed.value, clientInputs)
+    return issueVisible(key, state)
+  })
+})
+
+/** Попытка выпуска с ошибками: показываем все и ведём к первой. */
+async function revealErrors() {
+  revealed.value = true
+  await focusFirstError()
+}
+
+/** Сколько обязательных полей заполнено: нейтральный счётчик до попытки выпуска. */
+const required = computed(() =>
+  requiredFields({
+    partnerCode: form.value.partnerCode,
+    responsible: form.value.responsible,
+    email: form.value.email,
+    row: row.value,
+  }),
+)
+const requiredFilled = computed(() => required.value.filter((field) => field.filled).length)
+
 /** Замечания по трём видам: блокирующие, расхождения с 1С и «не проверено». */
-const errorIssues = computed(() => issues.value.filter((issue) => issue.blocking && !issue.unchecked))
-const warningIssues = computed(() => issues.value.filter((issue) => !issue.blocking && !issue.unchecked))
-const uncheckedIssues = computed(() => issues.value.filter((issue) => issue.unchecked))
+const errorIssues = computed(() => visibleIssues.value.filter((issue) => issue.blocking && !issue.unchecked))
+const warningIssues = computed(() => visibleIssues.value.filter((issue) => !issue.blocking && !issue.unchecked))
+const uncheckedIssues = computed(() => visibleIssues.value.filter((issue) => issue.unchecked))
 
 /** Отправитель свёрнут в строку; ошибка в его полях раскрывает его сама. */
 const senderOpen = ref(false)
 const senderHasError = computed(() => errorIssues.value.some((issue) => senderKeys.has(fieldKey(issue))))
-const senderHasWarning = computed(() => issues.value.some((issue) => senderKeys.has(fieldKey(issue))))
+const senderHasWarning = computed(() => visibleIssues.value.some((issue) => senderKeys.has(fieldKey(issue))))
 watch(senderHasError, (bad) => {
   if (bad) senderOpen.value = true
 })
@@ -468,7 +542,7 @@ const inlineKeys = computed(() => {
   return new Set(keys)
 })
 const orphanIssues = computed(() =>
-  issues.value.filter((issue) => issue.row <= 1 && !inlineKeys.value.has(fieldKey(issue))),
+  visibleIssues.value.filter((issue) => issue.row <= 1 && !inlineKeys.value.has(fieldKey(issue))),
 )
 
 /** Справка о программах свёрнута: в заголовке — сводка. */
@@ -913,6 +987,7 @@ function resetForm() {
   savedId.value = 0
   revision.value = 0
   savedInfo.value = null
+  resetVisibility(false)
   currentClient.value = null
   formClient.value = null
   pickedKey.value = null
@@ -1031,14 +1106,14 @@ watch(
     </Message>
 
     <Message
-      v-if="blocking"
+      v-if="blocking && errorIssues.length"
       severity="error"
       :closable="false"
     >
       Заявку выпускать нельзя: исправьте отмеченные поля.
     </Message>
     <Message
-      v-else-if="issues.some((issue) => !issue.unchecked)"
+      v-else-if="!blocking && visibleIssues.some((issue) => !issue.unchecked)"
       severity="warn"
       :closable="false"
     >
@@ -1084,6 +1159,8 @@ watch(
     <div
       ref="formEl"
       class="form"
+      @focusin="onFocusIn"
+      @focusout="onFocusOut"
     >
       <!-- Отправитель приходит из настроек: свёрнут в строку, раскрывается щелчком
            и сам — когда в его полях ошибка. Правки действуют только на эту заявку. -->
@@ -1697,9 +1774,13 @@ watch(
         {{ errorIssues.length }} {{ plural(errorIssues.length, 'ошибка', 'ошибки', 'ошибок') }}
       </button>
       <span
-        v-else-if="validated"
+        v-else-if="validated && !blocking"
         class="ok-count"
       ><i class="pi pi-check-circle" /> Ошибок нет</span>
+      <span
+        v-if="!revealed && requiredFilled < required.length"
+        class="progress"
+      >Заполнено {{ requiredFilled }} из {{ required.length }} обязательных</span>
       <span
         v-if="warningIssues.length"
         class="warn"
@@ -1722,14 +1803,14 @@ watch(
         <Button
           label="Скачать файл"
           icon="pi pi-download"
-          :disabled="!validated || blocking || checking"
+          :disabled="!validated || checking"
           @click="download"
         />
         <Button
           label="Отправить…"
           icon="pi pi-send"
           :loading="sending"
-          :disabled="!validated || blocking || checking || sending"
+          :disabled="!validated || checking || sending"
           @click="askSend"
         />
       </div>
@@ -2124,6 +2205,11 @@ label,
   align-items: center;
   gap: 6px;
   color: var(--ui-success);
+}
+
+/* Новая заявка: сколько обязательных заполнено — нейтрально, не ошибкой. */
+.progress {
+  color: var(--ui-text-muted);
 }
 
 @media (width <= 900px) {
