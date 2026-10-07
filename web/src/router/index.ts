@@ -49,4 +49,37 @@ router.beforeEach((to) => {
   return true
 })
 
+/**
+ * Кусок экрана не загрузился — вкладка открыта до обновления программы, и
+ * файлов прошлой сборки на сервере уже нет. Без этого переход молча срывался,
+ * и пункты меню показывали прежний экран. Загружаем адрес заново — уже с
+ * новой сборкой; один раз, чтобы при настоящем сбое не уйти в цикл.
+ */
+const reloadMark = 'pult-epd:chunk-reload'
+
+function isChunkError(error: unknown): boolean {
+  const text = error instanceof Error ? error.message : String(error)
+  return /dynamically imported module|Importing a module script failed|error loading dynamically imported module/i.test(text)
+}
+
+router.onError((error, to) => {
+  if (!isChunkError(error)) return
+  let reloaded = false
+  try {
+    reloaded = sessionStorage.getItem(reloadMark) === to.fullPath
+    sessionStorage.setItem(reloadMark, to.fullPath)
+  } catch {
+    // Хранилище недоступно — перезагружаем всё равно.
+  }
+  if (!reloaded) window.location.assign(to.fullPath)
+})
+
+router.afterEach(() => {
+  try {
+    sessionStorage.removeItem(reloadMark)
+  } catch {
+    // Нечего снимать.
+  }
+})
+
 export default router

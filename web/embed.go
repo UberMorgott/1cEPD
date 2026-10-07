@@ -23,6 +23,12 @@ var assets embed.FS
 //
 // Неизвестные пути возвращают index.html: маршруты обрабатывает Vue Router
 // на клиенте, и без этого перезагрузка страницы по адресу вроде /billing дала бы 404.
+//
+// Исключение — файлы: путь с расширением (/assets/ClientsView-old.js) после
+// обновления программы отвечает 404, а не index.html. Иначе вкладка, открытая
+// до обновления, получала вместо старого куска экрана HTML, переход в меню
+// молча срывался, и Клиенты и Находки показывали прежний экран. Сам index.html
+// не кэшируется: перезагрузка всегда берёт имена файлов новой сборки.
 func Handler() (http.Handler, error) {
 	root, err := fs.Sub(assets, "dist")
 	if err != nil {
@@ -38,8 +44,16 @@ func Handler() (http.Handler, error) {
 		}
 
 		if _, err := fs.Stat(root, name); err != nil {
+			if path.Ext(name) != "" {
+				http.NotFound(w, r)
+				return
+			}
+			name = "index.html"
 			r = r.Clone(r.Context())
 			r.URL.Path = "/"
+		}
+		if name == "index.html" {
+			w.Header().Set("Cache-Control", "no-cache")
 		}
 		files.ServeHTTP(w, r)
 	}), nil
