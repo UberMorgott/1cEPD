@@ -1,4 +1,4 @@
-import{$ as e,A as t,F as n,H as r,M as i,R as a,T as o,Tt as s,d as c,f as l,l as u,p as d,u as f}from"./client-D_s8yrfH.js";import{d as p,l as m,tt as h}from"./_plugin-vue_export-helper-BUaoTuDi.js";import{o as g}from"./index-Cy_YKy_V.js";import{g as _}from"./PageHeader-DKZ82D1Q.js";var v=p.extend({name:`tag`,style:`
+import{$ as e,A as t,F as n,H as r,M as i,R as a,T as o,Tt as s,d as c,f as l,l as u,p as d,u as f}from"./client-C0C9m9Fi.js";import{d as p,l as m,st as h}from"./_plugin-vue_export-helper-Dx1ydjeN.js";import{o as g}from"./index-CFTz59NC.js";import{g as _}from"./PageHeader-BvIrA8Yl.js";var v=p.extend({name:`tag`,style:`
     .p-tag {
         display: inline-flex;
         align-items: center;

@@ -1,4 +1,4 @@
-import{M as e,T as t,p as n}from"./client-D_s8yrfH.js";import{d as r,tt as i}from"./_plugin-vue_export-helper-BUaoTuDi.js";import{n as a}from"./inputtext-IavC6RRl.js";var o=r.extend({name:`textarea`,style:`
+import{M as e,T as t,p as n}from"./client-C0C9m9Fi.js";import{d as r,st as i}from"./_plugin-vue_export-helper-Dx1ydjeN.js";import{n as a}from"./inputtext-BeycRH6V.js";var o=r.extend({name:`textarea`,style:`
     .p-textarea {
         font-family: inherit;
         font-feature-settings: inherit;

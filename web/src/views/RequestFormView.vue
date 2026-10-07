@@ -7,12 +7,13 @@ import InputText from 'primevue/inputtext'
 import InputNumber from 'primevue/inputnumber'
 import Select from 'primevue/select'
 import Message from 'primevue/message'
+import Tooltip from 'primevue/tooltip'
 import EpdAdviceNote from '../components/EpdAdviceNote.vue'
 import IndustryNote from '../components/IndustryNote.vue'
 import ItsContracts from '../components/ItsContracts.vue'
 import PageHeader from '../components/PageHeader.vue'
 import { clientKey as cardKey } from '../domain'
-import { requisites, shortName, when } from '../format'
+import { plural, requisites, shortName, when } from '../format'
 import {
   downloadRequestFile,
   requestFileName,
@@ -422,6 +423,77 @@ async function openRequest(id: number, copy = false) {
 }
 
 const passwordInput = ref<{ $el: HTMLInputElement } | null>(null)
+
+/** Подсказки по наведению: длинные пояснения не растягивают форму. */
+const vTooltip = Tooltip
+const passwordHint =
+  'Пароль подтверждает подлинность заявки — это не пароль Портала и не пароль API. ' +
+  'По умолчанию его нет: чтобы назначить, заполните только «Новый пароль».'
+
+/**
+ * Ключ поля замечания, как в data-field разметки: у шапки и строки есть
+ * одноимённые responsible и email — их разводит номер строки (0 — шапка).
+ */
+function fieldKey(issue: ItsIssue): string {
+  return issue.field === 'responsible' || issue.field === 'email' ? `${issue.field}:${issue.row}` : issue.field
+}
+
+/** Поля шапки — отправителя заявки из настроек. */
+const senderKeys = new Set(['partnerCode', 'responsible:0', 'email:0', 'password', 'newPassword'])
+
+/** Замечания по трём видам: блокирующие, расхождения с 1С и «не проверено». */
+const errorIssues = computed(() => issues.value.filter((issue) => issue.blocking && !issue.unchecked))
+const warningIssues = computed(() => issues.value.filter((issue) => !issue.blocking && !issue.unchecked))
+const uncheckedIssues = computed(() => issues.value.filter((issue) => issue.unchecked))
+
+/** Отправитель свёрнут в строку; ошибка в его полях раскрывает его сама. */
+const senderOpen = ref(false)
+const senderHasError = computed(() => errorIssues.value.some((issue) => senderKeys.has(fieldKey(issue))))
+const senderHasWarning = computed(() => issues.value.some((issue) => senderKeys.has(fieldKey(issue))))
+watch(senderHasError, (bad) => {
+  if (bad) senderOpen.value = true
+})
+
+/**
+ * Поля, у которых форма показывает замечание прямо под собой. Остальные
+ * (вся заявка, поля без своего места) — общей строкой над формой.
+ */
+const inlineKeys = computed(() => {
+  const keys = [
+    ...senderKeys, 'startDate', 'companyName', 'inn', 'kpp', 'responsible:1', 'email:1', 'phone',
+    'tariffCode', 'ownerCode', 'regNumber', 'login', 'workplaces', 'deliveryType',
+  ]
+  if (row.value.deliveryType === '1') keys.push('distributorCode')
+  if (row.value.operation === '1') keys.push('operation', 'refusalDate', 'refusalReason')
+  return new Set(keys)
+})
+const orphanIssues = computed(() =>
+  issues.value.filter((issue) => issue.row <= 1 && !inlineKeys.value.has(fieldKey(issue))),
+)
+
+/** Справка о программах свёрнута: в заголовке — сводка. */
+const programsOpen = ref(false)
+const programProblems = computed(() => programs.value.filter((program) => !program.hasAccess).length)
+const filledExtras = computed(() => row.value.extraRegNumbers.map((value) => value.trim()).filter(Boolean))
+
+const formEl = ref<HTMLElement | null>(null)
+
+/** «N ошибок» в панели действий: к первому полю с ошибкой, раскрыв его раздел. */
+async function focusFirstError() {
+  const keys = new Set(errorIssues.value.map(fieldKey))
+  if (senderHasError.value) senderOpen.value = true
+  await nextTick()
+  const target = [...(formEl.value?.querySelectorAll<HTMLElement>('[data-field]') ?? [])].find((el) =>
+    keys.has(el.dataset.field ?? ''),
+  )
+  if (!target) {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    return
+  }
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  const control = target.querySelector<HTMLElement>('input:not([type="hidden"]), [tabindex="0"]')
+  control?.focus({ preventScroll: true })
+}
 
 /** Карточки клиентов: реестр ЭДО и прошлые заявки. Подбор идёт по ним локально. */
 const clients = ref<ItsClientCard[]>([])
@@ -864,6 +936,7 @@ async function loadRoute() {
     }
     if (route.query.download) {
       if (!form.value.password) {
+        senderOpen.value = true
         notice.value =
           'Пароли в черновиках не хранятся: введите пароль заявки и нажмите «Скачать файл».'
         await nextTick()
@@ -939,27 +1012,6 @@ watch(
           </span>
         </div>
       </template>
-      <template #actions>
-        <Button
-          label="Сохранить"
-          icon="pi pi-save"
-          :disabled="saving"
-          @click="save"
-        />
-        <Button
-          label="Скачать файл"
-          icon="pi pi-download"
-          :disabled="!validated || blocking || checking"
-          @click="download"
-        />
-        <Button
-          label="Отправить…"
-          icon="pi pi-send"
-          :loading="sending"
-          :disabled="!validated || blocking || checking || sending"
-          @click="askSend"
-        />
-      </template>
       <template #error>
         <RouterLink
           v-if="notConfigured"
@@ -1018,22 +1070,131 @@ watch(
       />
     </div>
 
-    <!-- Замечания обо всей заявке: ни одно поле формы их не показывает. -->
+    <!-- Замечания без своего поля в форме: обо всей заявке и о полях, которых
+         на экране нет. -->
     <p
-      v-for="issue in issuesFor('rows')"
-      :key="issue.message"
+      v-for="issue in orphanIssues"
+      :key="issue.field + issue.message"
       :class="issueClass(issue)"
       class="banner"
     >
       {{ issue.message }}
     </p>
 
-    <div class="form">
-      <fieldset class="picker">
-        <legend>Клиент из базы</legend>
+    <div
+      ref="formEl"
+      class="form"
+    >
+      <!-- Отправитель приходит из настроек: свёрнут в строку, раскрывается щелчком
+           и сам — когда в его полях ошибка. Правки действуют только на эту заявку. -->
+      <div
+        class="sender"
+        :class="{ open: senderOpen }"
+      >
+        <button
+          type="button"
+          class="sender-line"
+          :class="{ bad: senderHasError, warn: !senderHasError && senderHasWarning }"
+          :aria-expanded="senderOpen"
+          aria-controls="sender-fields"
+          @click="senderOpen = !senderOpen"
+        >
+          <span class="sender-label">Отправитель:</span>
+          <span class="sender-value">
+            {{ form.partnerCode || 'код не задан' }} · {{ form.responsible || 'ответственный не задан' }} ·
+            {{ form.email || 'e-mail не задан' }} ·
+            {{ form.password ? 'пароль задан' : 'без пароля' }}<template v-if="form.newPassword"> · новый пароль</template>
+          </span>
+          <i
+            class="pi"
+            :class="senderOpen ? 'pi-chevron-up' : 'pi-pencil'"
+          />
+        </button>
+        <div
+          v-show="senderOpen"
+          id="sender-fields"
+          class="grid sender-fields"
+        >
+          <label data-field="partnerCode">Код партнёра
+            <InputText v-model="form.partnerCode" />
+            <small
+              v-for="issue in issuesFor('partnerCode')"
+              :key="issue.message"
+              :class="issueClass(issue)"
+            >{{ issue.message }}</small>
+          </label>
+          <label data-field="responsible:0">Ответственный
+            <InputText v-model="form.responsible" />
+            <small
+              v-for="issue in issuesFor('responsible', 0)"
+              :key="issue.message"
+              :class="issueClass(issue)"
+            >{{ issue.message }}</small>
+          </label>
+          <label data-field="email:0">E-mail для протокола
+            <InputText v-model="form.email" />
+            <small
+              v-for="issue in issuesFor('email', 0)"
+              :key="issue.message"
+              :class="issueClass(issue)"
+            >{{ issue.message }}</small>
+          </label>
+          <label data-field="password">
+            <span class="caption-row">Пароль заявки
+              <i
+                v-tooltip.top="passwordHint"
+                class="pi pi-info-circle hint"
+                tabindex="0"
+                :aria-label="passwordHint"
+              />
+            </span>
+            <InputText
+              ref="passwordInput"
+              v-model="form.password"
+              type="password"
+              autocomplete="off"
+            />
+            <small
+              v-for="issue in issuesFor('password')"
+              :key="issue.message"
+              :class="issueClass(issue)"
+            >{{ issue.message }}</small>
+          </label>
+          <label data-field="newPassword">Новый пароль
+            <InputText
+              v-model="form.newPassword"
+              type="password"
+              autocomplete="off"
+            />
+            <small
+              v-for="issue in issuesFor('newPassword')"
+              :key="issue.message"
+              :class="issueClass(issue)"
+            >{{ issue.message }}</small>
+          </label>
+        </div>
+      </div>
+
+      <!-- С выбора клиента начинается заявка: он, название и дата — первой строкой. -->
+      <fieldset class="top">
         <!-- Не <label>: щелчок по label переотправляется в Select и тут же закрывает список. -->
-        <div class="field">
-          <span id="client-picker-label">Работаем со старым клиентом — выберите его, и все известные данные попадут в заявку</span>
+        <div class="field picker">
+          <span class="caption-row">
+            <span id="client-picker-label">Клиент из базы</span>
+            <i
+              v-tooltip.top="'Работаем со старым клиентом — выберите его, и все известные данные попадут в заявку'"
+              class="pi pi-info-circle hint"
+              tabindex="0"
+              aria-label="Выберите клиента — все известные данные попадут в заявку"
+            />
+            <RouterLink
+              v-if="rowCardKey"
+              class="card-link"
+              :to="{ name: 'client', params: { key: rowCardKey } }"
+            >
+              <i class="pi pi-id-card" /> Карточка клиента
+            </RouterLink>
+          </span>
           <Select
             ref="clientPicker"
             v-model="pickedKey"
@@ -1066,143 +1227,20 @@ watch(
               </div>
             </template>
           </Select>
+          <small
+            v-if="innMatches.length"
+            class="note"
+          >
+            В списке только клиенты с ИНН {{ innMatches[0]?.row.inn }}: выберите нужный КПП.
+          </small>
         </div>
-        <p
-          v-if="innMatches.length"
-          class="fixed"
-        >
-          В списке только клиенты с ИНН {{ innMatches[0]?.row.inn }}: выберите нужный КПП.
-        </p>
-        <RouterLink
-          v-if="rowCardKey"
-          class="card-link"
-          :to="{ name: 'client', params: { key: rowCardKey } }"
-        >
-          <i class="pi pi-id-card" /> Карточка клиента
-        </RouterLink>
-      </fieldset>
-
-      <fieldset>
-        <legend>Отправитель</legend>
         <label>Название заявки
           <InputText
             v-model="title"
             :placeholder="defaultTitle"
           />
         </label>
-        <label>Код партнёра
-          <InputText v-model="form.partnerCode" />
-          <small
-            v-for="issue in issuesFor('partnerCode')"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-        </label>
-        <label>Ответственный
-          <InputText v-model="form.responsible" />
-          <small
-            v-for="issue in issuesFor('responsible', 0)"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-        </label>
-        <label>E-mail для протокола
-          <InputText v-model="form.email" />
-          <small
-            v-for="issue in issuesFor('email', 0)"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-        </label>
-        <label>Пароль заявки
-          <InputText
-            ref="passwordInput"
-            v-model="form.password"
-            type="password"
-            autocomplete="off"
-          />
-          <small
-            v-for="issue in issuesFor('password')"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-        </label>
-        <label>Новый пароль
-          <InputText
-            v-model="form.newPassword"
-            type="password"
-            autocomplete="off"
-          />
-          <small
-            v-for="issue in issuesFor('newPassword')"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-        </label>
-        <p class="fixed">
-          Пароль подтверждает подлинность заявки — это не пароль Портала и не пароль API.
-          По умолчанию его нет: чтобы назначить, заполните только «Новый пароль».
-        </p>
-      </fieldset>
-
-      <fieldset>
-        <legend>Тариф</legend>
-        <!-- Не <label>: в нём Select закрывает свой список тем же щелчком. -->
-        <div class="field">
-          <span id="tariff-label">Вид 1С:ИТС</span>
-          <Select
-            v-model="row.tariffCode"
-            aria-labelledby="tariff-label"
-            :options="tariffs"
-            option-label="name"
-            option-value="code"
-            placeholder="Выберите тариф"
-          />
-          <small
-            v-for="issue in issuesFor('tariffCode')"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-          <EpdAdviceNote
-            v-if="formAdvice"
-            :advice="formAdvice"
-            class="advice"
-          >
-            <Button
-              v-if="formAdvice.best && !formAdvice.fresh && row.tariffCode !== formAdvice.best.code"
-              :label="`Выбрать ${formAdvice.best.name.replace('1С-ЭДО. ', '')}`"
-              size="small"
-              outlined
-              @click="row.tariffCode = formAdvice.best.code"
-            />
-          </EpdAdviceNote>
-        </div>
-        <label>Код абонента-владельца
-          <InputText
-            v-model="row.ownerCode"
-            placeholder="CL-1000530"
-          />
-          <small
-            v-for="issue in issuesFor('ownerCode')"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-        </label>
-        <label>Дата начала
+        <label data-field="startDate">Дата начала
           <InputText
             v-model="row.startDate"
             placeholder="01.10.26"
@@ -1211,341 +1249,491 @@ watch(
             v-for="issue in issuesFor('startDate')"
             :key="issue.message"
             :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
+          >{{ issue.message }}</small>
           <small
             v-for="note in notesFor('startDate')"
             :key="note.message"
             class="note"
-          >
-            {{ note.message }}
-          </small>
+          >{{ note.message }}</small>
         </label>
-        <p class="fixed">
-          Количество выпусков 12 и предоплата за весь срок подставляются автоматически:
-          для тарифов ЭПД других значений не бывает.
-        </p>
       </fieldset>
 
-      <fieldset>
-        <legend>Клиент</legend>
-        <label>Наименование фирмы
-          <InputText v-model="row.companyName" />
-          <small
-            v-for="issue in issuesFor('companyName')"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-        </label>
-        <label>ИНН
-          <InputText
-            v-model="row.inn"
-            @update:model-value="lookupByInn"
-          />
-          <small
-            v-for="issue in issuesFor('inn')"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-        </label>
-        <label>КПП
-          <InputText
-            v-model="row.kpp"
-            :placeholder="row.inn.trim().length === 12 ? 'у ИП КПП нет' : ''"
-          />
-          <small
-            v-for="issue in issuesFor('kpp')"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-          <small
-            v-if="row.inn.trim().length === 12 && !row.kpp.trim()"
-            class="note"
-          >
-            У ИП КПП нет — поле остаётся пустым.
-          </small>
-        </label>
-        <!-- Не <label>: в нём Select закрывает свой список тем же щелчком. -->
-        <div class="field">
-          <span id="reg-number-label">Регистрационный номер</span>
-          <!-- У клиента несколько программ: основной выбирается из его регномеров,
-               но вписать другой по-прежнему можно. -->
-          <Select
-            v-if="regOptions.length > 1"
-            v-model="row.regNumber"
-            aria-labelledby="reg-number-label"
-            :options="regOptions"
-            option-label="label"
-            option-value="value"
-            editable
-            placeholder="Выберите основной регномер"
-          />
-          <InputText
-            v-else
-            v-model="row.regNumber"
-            aria-labelledby="reg-number-label"
-          />
-          <small
-            v-if="autoChecking"
-            class="note"
-          >
-            <i class="pi pi-spin pi-spinner" /> Проверяем программы клиента в 1С…
-          </small>
-          <small
-            v-else-if="regHint"
-            class="note"
-          >
-            {{ regHint }}
-          </small>
-          <small
-            v-for="issue in issuesFor('regNumber')"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-          <small
-            v-for="note in notesFor('regNumber')"
-            :key="note.message"
-            class="note"
-          >
-            {{ note.message }}
-          </small>
-        </div>
-        <label>Логин Личного кабинета
-          <InputText
-            v-model="row.login"
-            placeholder="client@example.ru"
-          />
-          <small
-            v-for="issue in issuesFor('login')"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-          <small
-            v-if="currentClient?.edoIds?.length"
-            class="note"
-          >
-            Идентификатор ЭДО: {{ currentClient.edoIds.join(', ') }} — должен быть привязан к этому логину.
-          </small>
-        </label>
-        <!-- То же, что «Проверка условий сопровождения» в Личном кабинете 1С. -->
-        <div class="programs">
-          <div class="programs-head">
-            <span>Программы в Личном кабинете</span>
-            <Button
-              label="Проверить в 1С"
-              icon="pi pi-refresh"
-              size="small"
-              :loading="checkingPrograms"
-              :disabled="checkingPrograms || !row.inn.trim() || !(row.login.trim() || row.regNumber.trim())"
-              @click="checkPrograms"
-            />
+      <div class="cols">
+        <fieldset>
+          <legend>Клиент</legend>
+          <div class="grid">
+            <label
+              class="wide"
+              data-field="companyName"
+            >Наименование фирмы
+              <InputText v-model="row.companyName" />
+              <small
+                v-for="issue in issuesFor('companyName')"
+                :key="issue.message"
+                :class="issueClass(issue)"
+              >{{ issue.message }}</small>
+            </label>
+            <label data-field="inn">ИНН
+              <InputText
+                v-model="row.inn"
+                @update:model-value="lookupByInn"
+              />
+              <small
+                v-for="issue in issuesFor('inn')"
+                :key="issue.message"
+                :class="issueClass(issue)"
+              >{{ issue.message }}</small>
+            </label>
+            <label data-field="kpp">КПП
+              <InputText
+                v-model="row.kpp"
+                :placeholder="row.inn.trim().length === 12 ? 'у ИП КПП нет' : ''"
+              />
+              <small
+                v-for="issue in issuesFor('kpp')"
+                :key="issue.message"
+                :class="issueClass(issue)"
+              >{{ issue.message }}</small>
+              <small
+                v-if="row.inn.trim().length === 12 && !row.kpp.trim()"
+                class="note"
+              >У ИП КПП нет — поле остаётся пустым.</small>
+            </label>
+            <label data-field="responsible:1">Ответственный у клиента
+              <InputText v-model="row.responsible" />
+              <small
+                v-for="issue in issuesFor('responsible', 1)"
+                :key="issue.message"
+                :class="issueClass(issue)"
+              >{{ issue.message }}</small>
+            </label>
+            <label data-field="email:1">E-mail клиента
+              <InputText v-model="row.email" />
+              <small
+                v-for="issue in issuesFor('email', 1)"
+                :key="issue.message"
+                :class="issueClass(issue)"
+              >{{ issue.message }}</small>
+            </label>
+            <div class="phone wide">
+              <label>Код города
+                <InputText v-model="row.phoneCode" />
+              </label>
+              <label data-field="phone">Телефон
+                <InputText v-model="row.phone" />
+                <small
+                  v-for="issue in issuesFor('phone')"
+                  :key="issue.message"
+                  :class="issueClass(issue)"
+                >{{ issue.message }}</small>
+              </label>
+            </div>
           </div>
-          <table v-if="programs.length">
-            <thead>
-              <tr>
-                <th>Рег. номер</th>
-                <th>Программа</th>
-                <th>Условия сопровождения</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
-                v-for="(program, index) in programs"
-                :key="index"
+        </fieldset>
+
+        <div class="stack">
+          <fieldset>
+            <legend>Тариф</legend>
+            <div class="grid">
+              <!-- Не <label>: в нём Select закрывает свой список тем же щелчком. -->
+              <div
+                class="field wide"
+                data-field="tariffCode"
               >
-                <td>{{ program.regNumber }}</td>
-                <td>{{ program.program }}</td>
-                <td :class="program.hasAccess ? 'ok' : 'bad'">
-                  {{ conditionText(program) }}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-          <p class="fixed">
-            <template v-if="programsCheckedAt">
-              Проверено {{ when(programsCheckedAt) }}.
-            </template>
-            Ищется по логину Личного кабинета, без него — по регистрационному номеру.
-          </p>
-        </div>
-        <div
-          v-if="clientIts"
-          class="programs"
-        >
-          <div class="programs-head">
-            <span>Договоры 1С:ИТС абонента {{ clientIts.code }}</span>
-          </div>
-          <ItsContracts
-            :subscriber="clientIts"
-            class="its"
-            checked
-          />
-          <IndustryNote
-            :industry="clientIts.industry"
-            label="ИТС Отраслевой"
-          />
-        </div>
-        <label>Рабочих мест
-          <InputNumber
-            v-model="row.workplaces"
-            :min="1"
-          />
-        </label>
-        <label>Ответственный у клиента
-          <InputText v-model="row.responsible" />
-          <small
-            v-for="issue in issuesFor('responsible', 1)"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-        </label>
-        <label>E-mail клиента
-          <InputText v-model="row.email" />
-          <small
-            v-for="issue in issuesFor('email', 1)"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-        </label>
-        <label>Код города
-          <InputText v-model="row.phoneCode" />
-        </label>
-        <label>Телефон
-          <InputText v-model="row.phone" />
-          <small
-            v-for="issue in issuesFor('phone')"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-        </label>
-      </fieldset>
+                <span
+                  id="tariff-label"
+                  class="caption-row"
+                >Вид 1С:ИТС
+                  <i
+                    v-tooltip.top="'Количество выпусков 12 и предоплата за весь срок подставляются автоматически: для тарифов ЭПД других значений не бывает.'"
+                    class="pi pi-info-circle hint"
+                    tabindex="0"
+                    aria-label="Количество выпусков 12 и предоплата за весь срок подставляются автоматически"
+                  />
+                </span>
+                <Select
+                  v-model="row.tariffCode"
+                  aria-labelledby="tariff-label"
+                  :options="tariffs"
+                  option-label="name"
+                  option-value="code"
+                  placeholder="Выберите тариф"
+                />
+                <small
+                  v-for="issue in issuesFor('tariffCode')"
+                  :key="issue.message"
+                  :class="issueClass(issue)"
+                >{{ issue.message }}</small>
+                <EpdAdviceNote
+                  v-if="formAdvice"
+                  :advice="formAdvice"
+                  class="advice"
+                >
+                  <Button
+                    v-if="formAdvice.best && !formAdvice.fresh && row.tariffCode !== formAdvice.best.code"
+                    :label="`Выбрать ${formAdvice.best.name.replace('1С-ЭДО. ', '')}`"
+                    size="small"
+                    outlined
+                    @click="row.tariffCode = formAdvice.best.code"
+                  />
+                </EpdAdviceNote>
+              </div>
+              <label data-field="ownerCode">Код абонента-владельца
+                <InputText
+                  v-model="row.ownerCode"
+                  placeholder="CL-1000530"
+                />
+                <small
+                  v-for="issue in issuesFor('ownerCode')"
+                  :key="issue.message"
+                  :class="issueClass(issue)"
+                >{{ issue.message }}</small>
+              </label>
+              <!-- Не <label>: в нём Select закрывает свой список тем же щелчком. -->
+              <div
+                class="field"
+                data-field="regNumber"
+              >
+                <span id="reg-number-label">Регистрационный номер</span>
+                <!-- У клиента несколько программ: основной выбирается из его регномеров,
+                     но вписать другой по-прежнему можно. -->
+                <Select
+                  v-if="regOptions.length > 1"
+                  v-model="row.regNumber"
+                  aria-labelledby="reg-number-label"
+                  :options="regOptions"
+                  option-label="label"
+                  option-value="value"
+                  editable
+                  placeholder="Выберите основной регномер"
+                />
+                <InputText
+                  v-else
+                  v-model="row.regNumber"
+                  aria-labelledby="reg-number-label"
+                />
+                <small
+                  v-if="autoChecking"
+                  class="note"
+                >
+                  <i class="pi pi-spin pi-spinner" /> Проверяем программы клиента в 1С…
+                </small>
+                <small
+                  v-else-if="regHint"
+                  class="note"
+                >{{ regHint }}</small>
+                <small
+                  v-for="issue in issuesFor('regNumber')"
+                  :key="issue.message"
+                  :class="issueClass(issue)"
+                >{{ issue.message }}</small>
+                <small
+                  v-for="note in notesFor('regNumber')"
+                  :key="note.message"
+                  class="note"
+                >{{ note.message }}</small>
+              </div>
+              <label data-field="login">Логин Личного кабинета
+                <InputText
+                  v-model="row.login"
+                  placeholder="client@example.ru"
+                />
+                <small
+                  v-for="issue in issuesFor('login')"
+                  :key="issue.message"
+                  :class="issueClass(issue)"
+                >{{ issue.message }}</small>
+                <small
+                  v-if="currentClient?.edoIds?.length"
+                  class="note"
+                >
+                  Идентификатор ЭДО: {{ currentClient.edoIds.join(', ') }} — должен быть привязан к этому логину.
+                </small>
+              </label>
+              <label data-field="workplaces">Рабочих мест
+                <InputNumber
+                  v-model="row.workplaces"
+                  :min="1"
+                />
+                <small
+                  v-for="issue in issuesFor('workplaces')"
+                  :key="issue.message"
+                  :class="issueClass(issue)"
+                >{{ issue.message }}</small>
+              </label>
+              <div
+                class="field"
+                data-field="deliveryType"
+              >
+                <span id="delivery-label">Получение</span>
+                <Select
+                  v-model="row.deliveryType"
+                  aria-labelledby="delivery-label"
+                  :options="deliveryOptions"
+                  option-label="label"
+                  option-value="value"
+                />
+                <small
+                  v-for="issue in issuesFor('deliveryType')"
+                  :key="issue.message"
+                  :class="issueClass(issue)"
+                >{{ issue.message }}</small>
+              </div>
+              <label
+                v-if="row.deliveryType === '1'"
+                data-field="distributorCode"
+              >Код дистрибьютора
+                <InputText v-model="row.distributorCode" />
+                <small
+                  v-for="issue in issuesFor('distributorCode')"
+                  :key="issue.message"
+                  :class="issueClass(issue)"
+                >{{ issue.message }}</small>
+              </label>
+            </div>
 
-      <fieldset>
-        <legend>Получение</legend>
-        <div class="field">
-          <span id="delivery-label">Способ получения</span>
-          <Select
-            v-model="row.deliveryType"
-            aria-labelledby="delivery-label"
-            :options="deliveryOptions"
-            option-label="label"
-            option-value="value"
-          />
-        </div>
-        <label v-if="row.deliveryType === '1'">Код дистрибьютора
-          <InputText v-model="row.distributorCode" />
-          <small
-            v-for="issue in issuesFor('distributorCode')"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-        </label>
-      </fieldset>
-
-      <fieldset>
-        <legend>Операция</legend>
-        <div class="field">
-          <span id="operation-label">Операция</span>
-          <Select
-            v-model="row.operation"
-            aria-labelledby="operation-label"
-            :options="operationOptions"
-            option-label="label"
-            option-value="value"
-          />
-          <small
-            v-for="issue in issuesFor('operation')"
-            :key="issue.message"
-            :class="issueClass(issue)"
-          >
-            {{ issue.message }}
-          </small>
-        </div>
-        <template v-if="row.operation === '1'">
-          <label>Дата отказа
-            <InputText
-              v-model="row.refusalDate"
-              placeholder="11.26"
-            />
-            <small
-              v-for="issue in issuesFor('refusalDate')"
-              :key="issue.message"
-              :class="issueClass(issue)"
+            <!-- Отказ для тарифов ЭПД сервер не принимает: в обычной заявке выбора
+                 операции нет. Старая заявка с отказом показывает его и способ исправить. -->
+            <div
+              v-if="row.operation === '1'"
+              class="refusal"
             >
-              {{ issue.message }}
-            </small>
-          </label>
-          <div class="field">
-            <span id="refusal-reason-label">Причина отказа</span>
-            <Select
-              v-model="row.refusalReason"
-              aria-labelledby="refusal-reason-label"
-              :options="refusalReasons"
-              option-label="label"
-              option-value="value"
-              placeholder="Выберите причину"
-            />
-            <small
-              v-for="issue in issuesFor('refusalReason')"
-              :key="issue.message"
-              :class="issueClass(issue)"
-            >
-              {{ issue.message }}
-            </small>
-          </div>
-        </template>
-        <p class="fixed">
-          Отказ регистрируется только со следующего месяца. Для тарифов ЭПД он не
-          оформляется вовсе: правила допускают только новый договор или продление.
-        </p>
-      </fieldset>
+              <p class="warn">
+                В заявке оформлен отказ. Для тарифов ЭПД отказ не оформляется: правила
+                допускают только новый договор или продление.
+                <Button
+                  label="Сменить на продление"
+                  size="small"
+                  outlined
+                  @click="row.operation = '0'"
+                />
+              </p>
+              <div class="grid">
+                <div
+                  class="field"
+                  data-field="operation"
+                >
+                  <span id="operation-label">Операция</span>
+                  <Select
+                    v-model="row.operation"
+                    aria-labelledby="operation-label"
+                    :options="operationOptions"
+                    option-label="label"
+                    option-value="value"
+                  />
+                  <small
+                    v-for="issue in issuesFor('operation')"
+                    :key="issue.message"
+                    :class="issueClass(issue)"
+                  >{{ issue.message }}</small>
+                </div>
+                <label data-field="refusalDate">Дата отказа
+                  <InputText
+                    v-model="row.refusalDate"
+                    placeholder="11.26"
+                  />
+                  <small
+                    v-for="issue in issuesFor('refusalDate')"
+                    :key="issue.message"
+                    :class="issueClass(issue)"
+                  >{{ issue.message }}</small>
+                </label>
+                <div
+                  class="field wide"
+                  data-field="refusalReason"
+                >
+                  <span id="refusal-reason-label">Причина отказа</span>
+                  <Select
+                    v-model="row.refusalReason"
+                    aria-labelledby="refusal-reason-label"
+                    :options="refusalReasons"
+                    option-label="label"
+                    option-value="value"
+                    placeholder="Выберите причину"
+                  />
+                  <small
+                    v-for="issue in issuesFor('refusalReason')"
+                    :key="issue.message"
+                    :class="issueClass(issue)"
+                  >{{ issue.message }}</small>
+                </div>
+              </div>
+            </div>
+          </fieldset>
 
-      <fieldset>
-        <legend>Другие программы по договору</legend>
-        <label
-          v-for="(_, index) in row.extraRegNumbers"
-          :key="index"
-        >Регистрационный номер {{ index + 1 }}
-          <!-- Остальные регномера клиента только предлагаются: заполняет человек. -->
-          <Select
-            v-if="extraOptions.length"
-            v-model="row.extraRegNumbers[index]"
-            :options="extraOptions"
-            option-label="label"
-            option-value="value"
-            editable
-            show-clear
-          />
-          <InputText
-            v-else
-            v-model="row.extraRegNumbers[index]"
-          />
-        </label>
-        <p class="fixed">
-          Необязательно: регистрационные номера других программ пользователя,
-          покрываемых этим договором.
-        </p>
-      </fieldset>
+          <!-- То же, что «Проверка условий сопровождения» в Личном кабинете 1С.
+               Справочные сведения свёрнуты: в заголовке — сколько программ, проблемы
+               и время проверки, заполненные регномера — строкой. -->
+          <fieldset
+            class="programs"
+            data-section="programs"
+          >
+            <legend>Программы в Личном кабинете</legend>
+            <div class="programs-head">
+              <button
+                type="button"
+                class="disclosure"
+                :aria-expanded="programsOpen"
+                aria-controls="programs-body"
+                @click="programsOpen = !programsOpen"
+              >
+                <i
+                  class="pi"
+                  :class="programsOpen ? 'pi-chevron-down' : 'pi-chevron-right'"
+                />
+                <span>
+                  <template v-if="programs.length">
+                    {{ programs.length }} {{ plural(programs.length, 'программа', 'программы', 'программ') }}<template
+                      v-if="programProblems"
+                    >, <span class="bad">без условий: {{ programProblems }}</span></template>
+                  </template>
+                  <template v-else>Программ нет</template>
+                  · <template v-if="programsCheckedAt">проверено {{ when(programsCheckedAt) }}</template><template v-else>не проверялись</template>
+                  <template v-if="clientIts"> · договоры ИТС</template>
+                  · других регномеров: {{ filledExtras.length ? filledExtras.join(', ') : 'нет' }}
+                </span>
+              </button>
+              <i
+                v-tooltip.top="'Ищется по логину Личного кабинета, без него — по регистрационному номеру.'"
+                class="pi pi-info-circle hint"
+                tabindex="0"
+                aria-label="Ищется по логину Личного кабинета, без него — по регистрационному номеру"
+              />
+              <Button
+                label="Проверить в 1С"
+                icon="pi pi-refresh"
+                size="small"
+                :loading="checkingPrograms"
+                :disabled="checkingPrograms || !row.inn.trim() || !(row.login.trim() || row.regNumber.trim())"
+                @click="checkPrograms"
+              />
+            </div>
+            <div
+              v-show="programsOpen"
+              id="programs-body"
+              class="programs-body"
+            >
+              <table v-if="programs.length">
+                <thead>
+                  <tr>
+                    <th>Рег. номер</th>
+                    <th>Программа</th>
+                    <th>Условия сопровождения</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="(program, index) in programs"
+                    :key="index"
+                  >
+                    <td>{{ program.regNumber }}</td>
+                    <td>{{ program.program }}</td>
+                    <td :class="program.hasAccess ? 'ok' : 'bad'">
+                      {{ conditionText(program) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <div
+                v-if="clientIts"
+                class="its-block"
+              >
+                <span class="sub-head">Договоры 1С:ИТС абонента {{ clientIts.code }}</span>
+                <ItsContracts
+                  :subscriber="clientIts"
+                  class="its"
+                  checked
+                />
+                <IndustryNote
+                  :industry="clientIts.industry"
+                  label="ИТС Отраслевой"
+                />
+              </div>
+              <span class="sub-head caption-row">Другие программы по договору
+                <i
+                  v-tooltip.top="'Необязательно: регистрационные номера других программ пользователя, покрываемых этим договором.'"
+                  class="pi pi-info-circle hint"
+                  tabindex="0"
+                  aria-label="Необязательно: регномера других программ, покрываемых этим договором"
+                />
+              </span>
+              <div class="grid">
+                <label
+                  v-for="(_, index) in row.extraRegNumbers"
+                  :key="index"
+                >Регистрационный номер {{ index + 1 }}
+                  <!-- Остальные регномера клиента только предлагаются: заполняет человек. -->
+                  <Select
+                    v-if="extraOptions.length"
+                    v-model="row.extraRegNumbers[index]"
+                    :options="extraOptions"
+                    option-label="label"
+                    option-value="value"
+                    editable
+                    show-clear
+                  />
+                  <InputText
+                    v-else
+                    v-model="row.extraRegNumbers[index]"
+                  />
+                </label>
+              </div>
+            </div>
+          </fieldset>
+        </div>
+      </div>
     </div>
+
+    <!-- Действия всегда под рукой: панель липнет к низу экрана. -->
+    <footer class="actions">
+      <button
+        v-if="errorIssues.length"
+        type="button"
+        class="error-count"
+        title="Перейти к первому полю с ошибкой"
+        @click="focusFirstError"
+      >
+        <i class="pi pi-exclamation-circle" />
+        {{ errorIssues.length }} {{ plural(errorIssues.length, 'ошибка', 'ошибки', 'ошибок') }}
+      </button>
+      <span
+        v-else-if="validated"
+        class="ok-count"
+      ><i class="pi pi-check-circle" /> Ошибок нет</span>
+      <span
+        v-if="warningIssues.length"
+        class="warn"
+      >{{ warningIssues.length }} {{ plural(warningIssues.length, 'расхождение', 'расхождения', 'расхождений') }} с 1С</span>
+      <span
+        v-if="uncheckedIssues.length"
+        class="unchecked"
+      >не проверено: {{ uncheckedIssues.length }}</span>
+      <span
+        v-if="checking"
+        class="note"
+      >Проверяем…</span>
+      <div class="buttons">
+        <Button
+          label="Сохранить черновик"
+          icon="pi pi-save"
+          :disabled="saving"
+          @click="save"
+        />
+        <Button
+          label="Скачать файл"
+          icon="pi pi-download"
+          :disabled="!validated || blocking || checking"
+          @click="download"
+        />
+        <Button
+          label="Отправить…"
+          icon="pi pi-send"
+          :loading="sending"
+          :disabled="!validated || blocking || checking || sending"
+          @click="askSend"
+        />
+      </div>
+    </footer>
 
     <Dialog
       v-model:visible="confirmOpen"
@@ -1601,29 +1789,31 @@ watch(
 section {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 12px;
   color: var(--ui-text);
   font-size: 14px;
   line-height: 20px;
 }
 
+/* Раскладка считается от ширины самой формы, а не окна: боковая панель
+   отнимает 16rem, и окно в 1200px — это меньше 900px под форму. */
 .form {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(20rem, 100%), 1fr));
-  gap: 16px;
-  align-items: start;
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 fieldset {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
 
   /* Иначе fieldset растягивается по самой длинной строке — выбранному клиенту
      в списке — и на телефоне форма уезжает за край экрана. */
   min-width: 0;
   margin: 0;
-  padding: 16px;
+  padding: 10px 12px 12px;
   background: var(--ui-bg-panel);
   border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius-lg);
@@ -1643,7 +1833,8 @@ label,
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  min-width: 0;
   font-size: 12px;
   line-height: 16px;
   font-weight: 500;
@@ -1658,20 +1849,288 @@ label,
   color: var(--ui-success);
 }
 
-/* Выбор клиента — во всю ширину формы: с него начинается заявка. */
-.picker {
+/* Короткие поля — по два в ряд, длинные (.wide) — во всю ширину раздела. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 12px;
+  align-items: start;
+}
+
+.grid .wide {
   grid-column: 1 / -1;
 }
 
-.picker .card-link {
-  align-self: flex-start;
+/* Код города узкий: телефон и код — одна ячейка сетки. */
+.phone {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr);
+  gap: 12px;
+}
+
+/* Отправитель — из настроек: свёрнут в одну строку-кнопку. */
+.sender {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0;
+  background: var(--ui-bg-panel);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-lg);
+}
+
+.sender.open {
+  padding-bottom: 12px;
+}
+
+.sender-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--ui-radius-lg);
+  background: transparent;
+  font: inherit;
   font-size: 13px;
+  color: var(--ui-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sender-line:hover {
+  background: var(--ui-bg-panel-hover);
+}
+
+.sender-label {
+  flex: none;
+  font-weight: 600;
+  color: var(--ui-text-highlighted);
+}
+
+.sender-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ui-text-muted);
+}
+
+.sender-line .pi {
+  flex: none;
+  font-size: 12px;
+  color: var(--ui-text-muted);
+}
+
+.sender-line.bad .sender-label,
+.sender-line.bad .pi {
+  color: var(--ui-error);
+}
+
+.sender-line.warn .sender-label {
+  color: var(--ui-warning);
+}
+
+.sender-fields {
+  padding: 0 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(14rem, 100%), 1fr));
+}
+
+/* Первая строка: клиент, название заявки, дата начала. */
+.top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px 12px;
+  align-items: start;
+  padding-top: 12px;
+}
+
+.caption-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.caption-row .card-link {
+  margin-left: auto;
+}
+
+.card-link {
+  font-size: 12px;
   color: var(--ui-primary);
   text-decoration: none;
 }
 
-.picker .card-link:hover {
+.card-link:hover {
   text-decoration: underline;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--ui-text-dimmed);
+  cursor: help;
+}
+
+.hint:hover,
+.hint:focus-visible {
+  color: var(--ui-text);
+  outline: none;
+}
+
+/* Две колонки, когда форме хватает ширины: слева клиент, справа тариф и программы. */
+.cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+@container (width >= 700px) {
+  .top {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) 9rem;
+  }
+}
+
+@container (width >= 900px) {
+  .cols {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@container (width < 420px) {
+  .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.refusal {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--ui-border);
+}
+
+.refusal p {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.disclosure {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ui-text-muted);
+  text-align: left;
+  cursor: pointer;
+}
+
+.disclosure .pi {
+  margin-top: 2px;
+  font-size: 10px;
+}
+
+.disclosure:hover {
+  color: var(--ui-text);
+}
+
+.programs-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.its-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sub-head {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--ui-text);
+}
+
+/* Панель действий липнет к низу экрана; поля под ней не прячутся — она
+   последняя в потоке, ниже неё ничего нет. */
+.actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 0 -24px -24px;
+  padding: 10px 24px;
+  background: var(--ui-bg);
+  border-top: 1px solid var(--ui-border);
+  font-size: 13px;
+  line-height: 16px;
+}
+
+.actions .buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.error-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in oklab, var(--ui-error) 40%, transparent);
+  border-radius: var(--ui-radius-md);
+  background: color-mix(in oklab, var(--ui-error) 12%, var(--ui-bg));
+  font: inherit;
+  font-weight: 600;
+  color: var(--ui-error);
+  cursor: pointer;
+}
+
+.error-count:hover {
+  background: color-mix(in oklab, var(--ui-error) 20%, var(--ui-bg));
+}
+
+.ok-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ui-success);
+}
+
+@media (width <= 900px) {
+  .actions {
+    margin: 0 -16px -16px;
+    padding: 10px 16px;
+  }
 }
 
 .client-option {
