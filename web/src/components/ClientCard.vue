@@ -10,14 +10,13 @@ import TabPanel from 'primevue/tabpanel'
 import TabPanels from 'primevue/tabpanels'
 import Tabs from 'primevue/tabs'
 import Tag from 'primevue/tag'
-import AnomalyAckDialog from '../components/AnomalyAckDialog.vue'
-import EpdAdviceNote from '../components/EpdAdviceNote.vue'
-import ForecastNote from '../components/ForecastNote.vue'
-import IndustryNote from '../components/IndustryNote.vue'
-import ItsContracts from '../components/ItsContracts.vue'
-import LicensesList from '../components/LicensesList.vue'
-import MonthBars, { type MonthBar } from '../components/MonthBars.vue'
-import PageHeader from '../components/PageHeader.vue'
+import AnomalyAckDialog from './AnomalyAckDialog.vue'
+import EpdAdviceNote from './EpdAdviceNote.vue'
+import ForecastNote from './ForecastNote.vue'
+import IndustryNote from './IndustryNote.vue'
+import ItsContracts from './ItsContracts.vue'
+import LicensesList from './LicensesList.vue'
+import MonthBars, { type MonthBar } from './MonthBars.vue'
 import { useRefreshable } from '../composables/useRefreshable'
 import {
   api,
@@ -43,13 +42,21 @@ import {
 import { daysText, formatDate, money, monthLabel, moscowDate, reportDate, requisites, shortName, when } from '../format'
 import { requestState, requestStateLabels, type RequestState } from '../requestFile'
 
+/**
+ * Карточка клиента — панель справа поверх списка Клиентов (маршрут client,
+ * вложенный в clients). Три вкладки: «Данные» — всё, что о клиенте известно,
+ * и откуда; «Проблемы» — поводы, продление и находки ЭДО с пометкой «это
+ * нормально»; «Заявки» — его заявки и новая. Вкладка — в адресе (?section=).
+ */
+const emit = defineEmits<{ changed: []; title: [text: string] }>()
+
 const route = useRoute()
 const router = useRouter()
 
 const key = computed(() => String(route.params.key ?? ''))
 const card = ref<ClientCard | null>(null)
 
-const { loading, refreshing, error, refreshFailed, dataAsOf, load } = useRefreshable(
+const { loading, refreshing, error, load } = useRefreshable(
   async () => {
     const found = await api.client(key.value)
     card.value = found
@@ -61,7 +68,7 @@ const { loading, refreshing, error, refreshFailed, dataAsOf, load } = useRefresh
   { failText: 'Не удалось загрузить карточку клиента.' },
 )
 
-// Переход к соседней организации — тот же экран с другим ключом.
+// Переход к соседней организации — та же панель с другим ключом.
 watch(key, (next) => {
   if (next && card.value?.key !== next) {
     card.value = null
@@ -69,32 +76,37 @@ watch(key, (next) => {
   }
 })
 
-type TabKey = 'overview' | 'edo' | 'its' | 'anomalies' | 'requests' | 'other'
-const tabKeys: TabKey[] = ['overview', 'edo', 'its', 'anomalies', 'requests', 'other']
+const title = computed(() => {
+  const c = card.value
+  if (!c) return ''
+  return shortName(c.clientName) || requisites(c)
+})
+watch(title, (text) => emit('title', text), { immediate: true })
 
-/** Вкладка — в адресе: ссылку на «Находки клиента» можно переслать. */
-const tab = computed<TabKey>({
+type Section = 'data' | 'problems' | 'requests'
+const sections: Section[] = ['data', 'problems', 'requests']
+
+const section = computed<Section>({
   get: () => {
-    const value = route.query.tab
-    return tabKeys.includes(value as TabKey) ? (value as TabKey) : 'overview'
+    const value = route.query.section
+    return sections.includes(value as Section) ? (value as Section) : 'data'
   },
   set: (value) => {
-    void router.replace({ query: { ...route.query, tab: value === 'overview' ? undefined : value } })
+    void router.replace({ query: { ...route.query, section: value === 'data' ? undefined : value } })
   },
 })
 
-function onTab(value: string | number) {
-  tab.value = value as TabKey
+function onSection(value: string | number) {
+  section.value = value as Section
 }
 
-const activeAnomalies = computed(() =>
-  (card.value?.anomalies ?? []).filter((item) => !item.acknowledged && !item.suppressed),
-)
+/** Сосед по ИНН или абоненту — та же панель, фильтры списка под ней сохраняются. */
+function cardLink(org: ClientRef) {
+  return { name: 'client', params: { key: org.key }, query: { ...route.query, section: undefined } }
+}
 
 const billingRows = computed(() => card.value?.billing.clients ?? [])
-const billingDue = computed(() =>
-  billingRows.value.filter((row) => row.overLimit).map((row) => row.amount),
-)
+const billingDue = computed(() => billingRows.value.filter((row) => row.overLimit).map((row) => row.amount))
 
 /** Самый поздний конец договора 1С:ИТС у абонентов клиента. */
 const itsEnd = computed(() =>
@@ -105,13 +117,20 @@ const itsEnd = computed(() =>
     .at(-1),
 )
 
+const sourceLabels: Record<string, string> = {
+  registry: 'реестр ЭДО (биллинг партнёра)',
+  traffic: 'отчёты трафика ЭДО',
+  import: 'выгрузка биллинга ЭПД (CSV)',
+  subscriber: 'база абонентов 1С',
+  request: 'заявки',
+}
+
 interface Alert {
   tone: 'error' | 'warn' | 'info'
   text: string
-  tab: TabKey
 }
 
-/** Что сделать по клиенту: то же, что Сводка показывает по всем. */
+/** Поводы клиента, кроме продления и находок: у тех свои блоки ниже. */
 const alerts = computed<Alert[]>(() => {
   const c = card.value
   if (!c) return []
@@ -121,51 +140,44 @@ const alerts = computed<Alert[]>(() => {
       list.push({
         tone: 'error',
         text: `Выставить счёт: сверх лимита ${row.billable} пакетов, ${money(row.amount)} (${monthLabel(c.billing.period)})`,
-        tab: 'edo',
       })
     } else if (row.lowRemainder) {
-      list.push({ tone: 'warn', text: `Лимит кончается: ${row.used} из ${row.limit ?? '—'}`, tab: 'edo' })
+      list.push({ tone: 'warn', text: `Лимит кончается: ${row.used} из ${row.limit ?? '—'}` })
     }
   }
   for (const item of c.forecast?.clients ?? []) {
-    if (item.warn) list.push({ tone: 'warn', text: `Прогноз: ${forecastText(item)}`, tab: 'edo' })
-  }
-  if (c.advice && !c.advice.optimal) {
-    list.push({
-      tone: 'info',
-      text: `Выгоднее ${epdBestText(c.advice)}: экономия ${money(c.advice.savings)} в год`,
-      tab: 'edo',
-    })
-  }
-  for (const item of c.itsExpiring) {
-    list.push({
-      tone: item.daysLeft < 0 ? 'error' : 'warn',
-      text: `${contractName(item.contract)} до ${moscowDate(item.contract.end)}, ${daysText(item.daysLeft)}`,
-      tab: 'its',
-    })
+    if (item.warn) list.push({ tone: 'warn', text: `Прогноз: ${forecastText(item)}` })
   }
   for (const sub of c.its) {
     if (sub.industry?.missing.length) {
-      list.push({ tone: 'warn', text: `ИТС Отраслевой: ${industryText(sub.industry)}`, tab: 'its' })
+      list.push({ tone: 'warn', text: `ИТС Отраслевой: ${industryText(sub.industry)}` })
     }
   }
   for (const item of c.licensesLow) {
     list.push({
       tone: item.over ? 'error' : 'warn',
       text: `${serviceName(item.option.type)}, ${item.tariffName}: ${optionText(item.option)}`,
-      tab: 'its',
     })
   }
-  if (activeAnomalies.value.length) {
-    const urgent = activeAnomalies.value.filter((item) => item.confidence === 'high').length
-    list.push({
-      tone: urgent ? 'error' : 'warn',
-      text: `Находки: ${activeAnomalies.value.length}${urgent ? `, срочных ${urgent}` : ''}`,
-      tab: 'anomalies',
-    })
+  if (c.advice && !c.advice.optimal) {
+    list.push({ tone: 'info', text: `Выгоднее ${epdBestText(c.advice)}: экономия ${money(c.advice.savings)} в год` })
   }
   return list
 })
+
+function hidden(item: Anomaly) {
+  return item.acknowledged || item.suppressed === true
+}
+
+const activeAnomalies = computed(() => (card.value?.anomalies ?? []).filter((item) => !hidden(item)))
+const hiddenAnomalies = computed(() => (card.value?.anomalies ?? []).filter(hidden))
+const reviewDue = computed(() => hiddenAnomalies.value.filter((item) => item.reviewDue).length)
+const showHidden = ref(false)
+const shownAnomalies = computed(() => (showHidden.value ? hiddenAnomalies.value : activeAnomalies.value))
+
+const problemCount = computed(
+  () => alerts.value.length + (card.value?.itsExpiring.length ?? 0) + activeAnomalies.value.length,
+)
 
 /** Заявку можно завести только на настоящий ИНН: нулевой робот 1С не примет. */
 const canRequest = computed(() => validInn(card.value?.inn ?? ''))
@@ -192,6 +204,24 @@ function renew(renewal: { startDate: string; tariffCode: string } | null | undef
 
 function renewContract(item: ItsExpiring) {
   renew(item.renewal)
+}
+
+/** «Проверить в 1С» договоры ИТС: сервер сам не повторит проверку моложе 10 минут. */
+const itsRefreshing = ref(false)
+const itsError = ref('')
+
+async function refreshIts() {
+  itsRefreshing.value = true
+  itsError.value = ''
+  try {
+    await api.refreshItsContracts()
+    await load(true)
+    emit('changed')
+  } catch (err) {
+    itsError.value = err instanceof Error ? err.message : 'Не удалось проверить договоры в 1С.'
+  } finally {
+    itsRefreshing.value = false
+  }
 }
 
 /** Строка биллинга и прогноз идентификатора — рядом с ним, а не отдельной таблицей. */
@@ -263,6 +293,7 @@ watch(
     const c = card.value
     programsLogin.value = c?.programsLogin || c?.logins[0] || ''
     programsRegNumber.value = c?.programs[0]?.regNumber ?? ''
+    showHidden.value = false
   },
   { immediate: true },
 )
@@ -292,24 +323,16 @@ function neighbours(orgs: ClientRef[]): ClientRef[] {
   return orgs.filter((org) => org.key !== card.value?.key)
 }
 
-/** Абоненты с соседями или регномерами — на вкладке «Прочее». */
-const otherSubscribers = computed(() =>
-  (card.value?.subscribers ?? []).filter((item) => neighbours(item.organizations).length || item.regNumbers.length),
-)
-
-const anomalyQuery = computed(() => {
-  const c = card.value
-  if (!c) return ''
-  return validInn(c.inn) ? c.inn : (c.identifiers[0]?.edoId ?? '')
-})
-
 function anomalyState(item: Anomaly): string {
   if (item.suppressed) return `погашена топологией${item.topologyPurpose ? `: ${item.topologyPurpose}` : ''}`
-  if (item.acknowledged) return `это нормально${item.ackReason ? `: ${item.ackReason}` : ''}`
+  if (item.acknowledged) {
+    const review = item.reviewAt ? `, пересмотр ${formatDate(item.reviewAt)}` : ''
+    return `это нормально${item.ackReason ? `: ${item.ackReason}` : ''}${review}`
+  }
   return ''
 }
 
-/** «Это нормально» и «Вернуть» — прямо в карточке, тем же диалогом, что в «Находках». */
+/** «Это нормально» и «Вернуть» — тем же диалогом, что в списке находок. */
 const ackTarget = ref<Anomaly | null>(null)
 const restoreBusy = ref(0)
 const anomalyError = ref('')
@@ -317,6 +340,7 @@ const anomalyError = ref('')
 async function acked() {
   ackTarget.value = null
   await load(true)
+  emit('changed')
 }
 
 async function restore(item: Anomaly) {
@@ -326,6 +350,7 @@ async function restore(item: Anomaly) {
     if (item.acknowledged) await api.unacknowledge(item.edoId, item.fingerprint)
     if (item.suppressed) await api.removeTopology({ inn: item.inn, kpp: item.kpp, edoId: item.edoId })
     await load(true)
+    emit('changed')
   } catch (err) {
     anomalyError.value = err instanceof Error ? err.message : 'Не удалось вернуть находку.'
   } finally {
@@ -346,41 +371,33 @@ function openRequest(item: ItsSavedRequest) {
 function duplicateRequest(item: ItsSavedRequest) {
   void router.push({ name: 'request-new', query: { from: item.id } })
 }
-
-const title = computed(() => {
-  const c = card.value
-  if (!c) return ''
-  return shortName(c.clientName) || requisites(c)
-})
 </script>
 
 <template>
-  <section>
-    <PageHeader
-      :refreshing="refreshing"
-      :data-as-of="dataAsOf"
-      :refresh-failed="refreshFailed"
-      :error="error"
-      @refresh="load(true)"
+  <div class="card">
+    <Message
+      v-if="error"
+      severity="error"
+      :closable="false"
     >
-      <template #meta>
-        <div
-          v-if="card"
-          class="head"
-        >
-          <strong :title="card.clientName">{{ title }}</strong>
-          <small>{{ requisites(card) }}</small>
+      {{ error }}
+    </Message>
+    <p
+      v-else-if="loading && !card"
+      class="calm"
+    >
+      Загружаем карточку…
+    </p>
+
+    <template v-if="card">
+      <header class="head">
+        <div class="head-text">
+          <small>{{ requisites(card) }}<template v-if="card.clientName !== title"> · {{ card.clientName }}</template></small>
         </div>
-        <span
-          v-else-if="loading"
-          class="meta"
-        >Загружаем карточку…</span>
-      </template>
-      <template #tools>
-        <template v-if="card">
+        <div class="head-tools">
           <Button
             v-if="canRequest"
-            label="Заявка"
+            label="Новая заявка"
             icon="pi pi-plus"
             size="small"
             @click="newRequest"
@@ -394,106 +411,42 @@ const title = computed(() => {
             :title="`Заявка на продление с ${card.renewal.startDate}`"
             @click="renew(card.renewal)"
           />
-        </template>
-      </template>
-    </PageHeader>
-
-    <template v-if="card">
-      <div class="badges">
-        <Tag
-          v-for="sub in card.subscribers"
-          :key="sub.code"
-          :severity="sub.inBase ? (sub.gone ? 'warn' : 'info') : card.ours ? 'info' : 'secondary'"
-          :value="
-            sub.inBase
-              ? `${sub.code}${sub.gone ? ' · пропал из 1С' : ''}`
-              : card.ours
-                ? `${sub.code} · 1С-ЭДО`
-                : `${sub.code} · нет в базе`
-          "
-          :title="
-            [
-              sub.name,
-              sub.inBase ? '' : 'Код владельца из нашего 1С-ЭДО, база абонентов 1С его не отдаёт',
-            ]
-              .filter(Boolean)
-              .join(' — ')
-          "
-        />
-        <Tag
-          v-if="!card.subscribers.length"
-          severity="warn"
-          value="Абонент не известен"
-        />
-        <Tag
-          v-if="!card.inBase && card.subscribers.length && card.subscribers.every((sub) => sub.inBase)"
-          severity="warn"
-          value="нет в базе абонентов"
-        />
-        <Tag
-          v-if="!card.identifiers.length"
-          severity="secondary"
-          value="ЭДО в биллинге нет"
-        />
-        <span
-          v-for="login in card.logins"
-          :key="login"
-          class="login"
-        >{{ login }}</span>
-      </div>
+          <Button
+            icon="pi pi-refresh"
+            size="small"
+            text
+            aria-label="Обновить карточку"
+            :loading="refreshing"
+            @click="load(true)"
+          />
+        </div>
+      </header>
 
       <Tabs
-        :value="tab"
-        scrollable
-        @update:value="onTab"
+        :value="section"
+        @update:value="onSection"
       >
         <TabList>
-          <Tab value="overview">
-            Обзор
+          <Tab value="data">
+            Данные
           </Tab>
-          <Tab value="edo">
-            ЭДО и биллинг · {{ card.identifiers.length }}
-          </Tab>
-          <Tab value="its">
-            1С:ИТС и программы
-          </Tab>
-          <Tab value="anomalies">
-            Находки · {{ activeAnomalies.length }}
+          <Tab value="problems">
+            Проблемы <span
+              v-if="problemCount"
+              class="count"
+              :class="{ alarm: alerts.some((a) => a.tone === 'error') || activeAnomalies.some((a) => a.confidence === 'high') }"
+            >{{ problemCount }}</span>
           </Tab>
           <Tab value="requests">
-            Заявки · {{ card.requests.length }}
-          </Tab>
-          <Tab value="other">
-            Прочее
+            Заявки <span
+              v-if="card.requests.length"
+              class="count"
+            >{{ card.requests.length }}</span>
           </Tab>
         </TabList>
         <TabPanels>
-          <TabPanel value="overview">
-            <ul
-              v-if="alerts.length"
-              class="alerts"
-            >
-              <li
-                v-for="(alert, index) in alerts"
-                :key="index"
-                :class="alert.tone"
-              >
-                <span>{{ alert.text }}</span>
-                <Button
-                  label="Подробнее"
-                  size="small"
-                  text
-                  @click="tab = alert.tab"
-                />
-              </li>
-            </ul>
-            <p
-              v-else
-              class="calm"
-            >
-              Срочного по клиенту нет.
-            </p>
-
+          <!-- Данные: всё о клиенте и откуда это известно. -->
+          <TabPanel value="data">
             <dl class="facts">
               <dt>Абонент</dt>
               <dd>
@@ -502,29 +455,33 @@ const title = computed(() => {
                     v-for="sub in card.subscribers"
                     :key="sub.code"
                     class="line"
-                  >{{ sub.code }}<template v-if="sub.name"> — {{ sub.name }}</template>
-                    <small v-if="neighbours(sub.organizations).length">
-                      · ещё {{ neighbours(sub.organizations).length }} орг.
-                    </small>
+                  ><code>{{ sub.code }}</code><template v-if="sub.name"> — {{ sub.name }}</template>
+                    <Tag
+                      v-if="!sub.inBase"
+                      severity="secondary"
+                      :value="card.ours ? 'только 1С-ЭДО' : 'нет в базе'"
+                    />
+                    <Tag
+                      v-if="sub.gone"
+                      severity="warn"
+                      value="пропал из 1С"
+                    />
                   </span>
                 </template>
                 <template v-else>
                   не известен
                 </template>
               </dd>
-              <dt>Идентификаторы ЭДО</dt>
-              <dd>
-                <template v-if="card.identifiers.length">
-                  <code
-                    v-for="item in card.identifiers"
-                    :key="item.edoId"
+              <template v-if="card.logins.length">
+                <dt>Логины</dt>
+                <dd>
+                  <span
+                    v-for="login in card.logins"
+                    :key="login"
                     class="line"
-                  >{{ item.edoId }}</code>
-                </template>
-                <template v-else>
-                  нет
-                </template>
-              </dd>
+                  >{{ login }}</span>
+                </dd>
+              </template>
               <dt>Биллинг за {{ monthLabel(card.billing.period) }}</dt>
               <dd>
                 <template v-if="billingRows.length">
@@ -539,16 +496,11 @@ const title = computed(() => {
               </dd>
               <dt>Договор 1С:ИТС</dt>
               <dd>{{ itsEnd ? `до ${moscowDate(itsEnd)}` : 'не проверялся' }}</dd>
-              <dt>Программы</dt>
-              <dd>
-                {{ card.programs.length ? `${card.programs.length}, проверено ${when(card.programsCheckedAt)}` : 'не проверялись' }}
-              </dd>
-              <dt>Заявки</dt>
-              <dd>{{ card.requests.length || 'нет' }}</dd>
+              <dt>Источники</dt>
+              <dd>{{ card.sources.map((s) => sourceLabels[s] ?? s).join(', ') || '—' }}</dd>
             </dl>
-          </TabPanel>
 
-          <TabPanel value="edo">
+            <h3>Идентификаторы ЭДО · {{ card.identifiers.length }}</h3>
             <p
               v-if="!card.identifiers.length"
               class="calm"
@@ -645,36 +597,8 @@ const title = computed(() => {
               </header>
               <EpdAdviceNote :advice="card.advice" />
             </article>
-          </TabPanel>
 
-          <TabPanel value="its">
-            <article
-              v-if="card.itsExpiring.length"
-              class="block"
-            >
-              <header class="block-head">
-                <strong>Продление</strong>
-              </header>
-              <ul class="plain">
-                <li
-                  v-for="item in card.itsExpiring"
-                  :key="`${item.subscriberCode}/${item.contract.name}/${item.contract.end}`"
-                >
-                  <span>
-                    {{ contractName(item.contract) }} до {{ moscowDate(item.contract.end) }},
-                    <span :class="item.daysLeft < 0 ? 'bad' : 'low'">{{ daysText(item.daysLeft) }}</span>
-                  </span>
-                  <Button
-                    v-if="canRequest"
-                    label="Продлить"
-                    icon="pi pi-file-edit"
-                    size="small"
-                    @click="renewContract(item)"
-                  />
-                </li>
-              </ul>
-            </article>
-
+            <h3>1С:ИТС и программы</h3>
             <article
               v-for="sub in card.its"
               :key="sub.code"
@@ -755,7 +679,7 @@ const title = computed(() => {
                 {{ checkError }}
               </Message>
               <template v-if="card.programsCheckedAt">
-                <small class="dim found">Найдено записей: {{ card.programs.length }}</small>
+                <small class="dim">Найдено записей: {{ card.programs.length }} · проверено {{ when(card.programsCheckedAt) }}</small>
                 <div
                   v-if="card.programs.length"
                   class="programs-scroll"
@@ -791,7 +715,6 @@ const title = computed(() => {
                     </tbody>
                   </table>
                 </div>
-                <small class="dim">Проверено {{ when(card.programsCheckedAt) }}</small>
               </template>
               <small
                 v-else
@@ -799,88 +722,207 @@ const title = computed(() => {
               >Ещё не проверялись.</small>
             </article>
 
-            <article
-              v-if="card.sameInn.length"
-              class="block"
-            >
-              <header class="block-head">
-                <strong>Тот же ИНН, другой КПП</strong>
-              </header>
-              <ul class="orgs">
-                <li
-                  v-for="org in card.sameInn"
-                  :key="org.key"
+            <template v-if="card.sameInn.length || card.subscribers.some((s) => neighbours(s.organizations).length || s.regNumbers.length)">
+              <h3>Связанные организации</h3>
+              <article
+                v-if="card.sameInn.length"
+                class="block"
+              >
+                <header class="block-head">
+                  <strong>Тот же ИНН, другой КПП</strong>
+                </header>
+                <ul class="orgs">
+                  <li
+                    v-for="org in card.sameInn"
+                    :key="org.key"
+                  >
+                    <RouterLink :to="cardLink(org)">
+                      {{ shortName(org.clientName) || '—' }}
+                    </RouterLink>
+                    <small>{{ requisites(org) }}</small>
+                  </li>
+                </ul>
+              </article>
+              <template
+                v-for="sub in card.subscribers"
+                :key="`orgs/${sub.code}`"
+              >
+                <article
+                  v-if="neighbours(sub.organizations).length || sub.regNumbers.length"
+                  class="block"
                 >
-                  <RouterLink :to="{ name: 'client', params: { key: org.key } }">
-                    {{ shortName(org.clientName) || '—' }}
-                  </RouterLink>
-                  <small>{{ requisites(org) }}</small>
-                </li>
-              </ul>
-            </article>
+                  <header class="block-head">
+                    <strong>Абонент {{ sub.code }}<template v-if="sub.name"> — {{ sub.name }}</template></strong>
+                  </header>
+                  <p
+                    v-if="sub.regNumbers.length"
+                    class="dim"
+                  >
+                    Регномера: {{ sub.regNumbers.join(', ') }}
+                  </p>
+                  <ul
+                    v-if="neighbours(sub.organizations).length"
+                    class="orgs"
+                  >
+                    <li
+                      v-for="org in neighbours(sub.organizations)"
+                      :key="org.key"
+                    >
+                      <RouterLink :to="cardLink(org)">
+                        {{ shortName(org.clientName) || '—' }}
+                      </RouterLink>
+                      <small>{{ requisites(org) }}</small>
+                    </li>
+                  </ul>
+                </article>
+              </template>
+            </template>
           </TabPanel>
 
-          <TabPanel value="anomalies">
-            <div class="panel-tools">
-              <RouterLink
-                v-if="anomalyQuery"
-                :to="{ name: 'clients', query: { show: 'anomalies', q: anomalyQuery } }"
-              >
-                Все находки списком
-              </RouterLink>
-            </div>
-            <Message
-              v-if="anomalyError"
-              severity="error"
-              :closable="false"
+          <!-- Проблемы: поводы, продление, находки ЭДО. -->
+          <TabPanel value="problems">
+            <ul
+              v-if="alerts.length"
+              class="alerts"
             >
-              {{ anomalyError }}
-            </Message>
-            <p
-              v-if="!card.anomalies.length"
-              class="calm"
-            >
-              Находок по клиенту нет.
-            </p>
-            <ul class="plain rows">
               <li
-                v-for="item in card.anomalies"
-                :key="item.id"
-                :class="{ muted: item.acknowledged || item.suppressed }"
+                v-for="(alert, index) in alerts"
+                :key="index"
+                :class="alert.tone"
               >
-                <div class="stack">
-                  <span>
-                    <Tag
-                      :severity="item.confidence === 'high' ? 'danger' : 'warn'"
-                      :value="anomalyImportance(item)"
-                    />
-                    <strong>{{ anomalyKindLabels[item.kind] ?? item.kind }}</strong>
-                  </span>
-                  <small>{{ item.details }}</small>
-                  <small><code>{{ item.edoId }}</code> · найдена {{ formatDate(item.detectedAt) }}</small>
-                  <small v-if="anomalyState(item)">{{ anomalyState(item) }}</small>
-                </div>
-                <span class="row-tools">
-                  <Button
-                    v-if="!item.acknowledged && !item.suppressed"
-                    label="Это нормально"
-                    size="small"
-                    outlined
-                    @click="ackTarget = item"
-                  />
-                  <Button
-                    v-else
-                    label="Вернуть"
-                    size="small"
-                    outlined
-                    :loading="restoreBusy === item.id"
-                    @click="restore(item)"
-                  />
-                </span>
+                {{ alert.text }}
               </li>
             </ul>
+
+            <section class="group">
+              <header class="block-head">
+                <h3>Продление 1С:ИТС</h3>
+                <Button
+                  label="Проверить в 1С"
+                  icon="pi pi-refresh"
+                  size="small"
+                  outlined
+                  :loading="itsRefreshing"
+                  title="Проверить договоры 1С:ИТС в 1С заново (не чаще раза в 10 минут)"
+                  @click="refreshIts"
+                />
+              </header>
+              <small
+                v-if="itsError"
+                class="bad"
+              >{{ itsError }}</small>
+              <ul
+                v-if="card.itsExpiring.length"
+                class="plain rows"
+              >
+                <li
+                  v-for="item in card.itsExpiring"
+                  :key="`${item.subscriberCode}/${item.contract.name}/${item.contract.end}`"
+                >
+                  <span>
+                    {{ contractName(item.contract) }} до {{ moscowDate(item.contract.end) }},
+                    <span :class="item.daysLeft < 0 ? 'bad' : 'low'">{{ daysText(item.daysLeft) }}</span>
+                  </span>
+                  <Button
+                    v-if="canRequest"
+                    label="Продлить"
+                    icon="pi pi-file-edit"
+                    size="small"
+                    @click="renewContract(item)"
+                  />
+                </li>
+              </ul>
+              <p
+                v-else
+                class="calm"
+              >
+                {{ itsEnd ? `Договор до ${moscowDate(itsEnd)}: продлевать пока рано.` : 'Договоры 1С:ИТС не проверялись.' }}
+              </p>
+            </section>
+
+            <section class="group">
+              <header class="block-head">
+                <h3>Находки ЭДО</h3>
+                <span class="seg">
+                  <Button
+                    :label="`Активные · ${activeAnomalies.length}`"
+                    size="small"
+                    :outlined="showHidden"
+                    @click="showHidden = false"
+                  />
+                  <Button
+                    :label="`Скрытые · ${hiddenAnomalies.length}`"
+                    size="small"
+                    :outlined="!showHidden"
+                    @click="showHidden = true"
+                  />
+                </span>
+              </header>
+              <Message
+                v-if="reviewDue && !showHidden"
+                severity="warn"
+                :closable="false"
+              >
+                Скрытых находок пора пересмотреть: {{ reviewDue }}. Пометки «это нормально» живут полгода.
+              </Message>
+              <Message
+                v-if="anomalyError"
+                severity="error"
+                :closable="false"
+              >
+                {{ anomalyError }}
+              </Message>
+              <p
+                v-if="!shownAnomalies.length"
+                class="calm"
+              >
+                {{ showHidden ? 'Скрытых находок нет.' : 'Активных находок нет.' }}
+              </p>
+              <ul class="plain rows">
+                <li
+                  v-for="item in shownAnomalies"
+                  :key="item.id"
+                >
+                  <div class="stack">
+                    <span>
+                      <Tag
+                        :severity="item.confidence === 'high' ? 'danger' : 'warn'"
+                        :value="anomalyImportance(item)"
+                      />
+                      <strong>{{ anomalyKindLabels[item.kind] ?? item.kind }}</strong>
+                    </span>
+                    <small>{{ item.details }}</small>
+                    <small><code>{{ item.edoId }}</code> · найдена {{ formatDate(item.detectedAt) }}</small>
+                    <small v-if="anomalyState(item)">{{ anomalyState(item) }}
+                      <Tag
+                        v-if="item.reviewDue"
+                        severity="warn"
+                        value="пора пересмотреть"
+                      /></small>
+                  </div>
+                  <span class="row-tools">
+                    <Button
+                      v-if="!hidden(item)"
+                      label="Это нормально"
+                      size="small"
+                      outlined
+                      @click="ackTarget = item"
+                    />
+                    <Button
+                      v-else
+                      label="Вернуть"
+                      size="small"
+                      outlined
+                      :loading="restoreBusy === item.id"
+                      @click="restore(item)"
+                    />
+                  </span>
+                </li>
+              </ul>
+            </section>
           </TabPanel>
 
+          <!-- Заявки клиента и новая. -->
           <TabPanel value="requests">
             <div class="panel-tools">
               <Button
@@ -930,45 +972,14 @@ const title = computed(() => {
               </li>
             </ul>
           </TabPanel>
-          <TabPanel value="other">
-            <p
-              v-if="!otherSubscribers.length"
-              class="calm"
-            >
-              Других сведений нет.
-            </p>
-            <article
-              v-for="sub in otherSubscribers"
-              :key="`orgs/${sub.code}`"
-              class="block"
-            >
-              <header class="block-head">
-                <strong>Абонент {{ sub.code }}<template v-if="sub.name"> — {{ sub.name }}</template></strong>
-              </header>
-              <p
-                v-if="sub.regNumbers.length"
-                class="dim"
-              >
-                Регномера: {{ sub.regNumbers.join(', ') }}
-              </p>
-              <ul
-                v-if="neighbours(sub.organizations).length"
-                class="orgs"
-              >
-                <li
-                  v-for="org in neighbours(sub.organizations)"
-                  :key="org.key"
-                >
-                  <RouterLink :to="{ name: 'client', params: { key: org.key } }">
-                    {{ shortName(org.clientName) || '—' }}
-                  </RouterLink>
-                  <small>{{ requisites(org) }}</small>
-                </li>
-              </ul>
-            </article>
-          </TabPanel>
         </TabPanels>
       </Tabs>
+      <p
+        v-if="!canRequest"
+        class="dim note"
+      >
+        ИНН клиента в 1С не заполнен (ключ {{ clientKey(card.inn, card.kpp) || card.key }}): заявку на него не завести.
+      </p>
     </template>
     <p
       v-else-if="!loading && !error"
@@ -976,25 +987,21 @@ const title = computed(() => {
     >
       Клиент не найден.
     </p>
-    <p
-      v-if="card && !canRequest"
-      class="dim page-note"
-    >
-      ИНН клиента в 1С не заполнен (ключ {{ clientKey(card.inn, card.kpp) || card.key }}): заявку на него не завести.
-    </p>
     <AnomalyAckDialog
       :target="ackTarget"
       @close="ackTarget = null"
       @done="acked"
     />
-  </section>
+  </div>
 </template>
 
+<style scoped src="../styles/controls.css"></style>
+
 <style scoped>
-section {
+.card {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   color: var(--ui-text);
   font-size: 14px;
   line-height: 20px;
@@ -1002,47 +1009,64 @@ section {
 
 .head {
   display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.head strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ui-text-highlighted);
-}
-
-.head small,
-.dim,
-.login {
-  color: var(--ui-text-muted);
-}
-
-/* Пояснение под вкладками стоит прямо на странице — своя плотная подложка,
-   чтобы узор фона не ложился под текст. */
-.page-note {
-  padding: 8px 12px;
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-lg);
-  background: var(--ui-bg);
-}
-
-.badges {
-  display: flex;
   flex-wrap: wrap;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
 }
 
-.login {
-  font-size: 12px;
-  overflow-wrap: anywhere;
+.head-text {
+  min-width: 0;
+  color: var(--ui-text-muted);
 }
 
-.calm {
+.head-tools,
+.row-tools,
+.seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.seg {
+  gap: 4px;
+}
+
+h3 {
+  margin: 16px 0 8px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--ui-text-highlighted);
+}
+
+.block-head h3 {
+  margin: 0;
+}
+
+.count {
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--ui-bg-accented);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ui-text);
+}
+
+.count.alarm {
+  background: color-mix(in oklab, var(--ui-error) 25%, var(--ui-bg));
+  color: var(--ui-error);
+}
+
+.calm,
+.dim {
   margin: 0;
   color: var(--ui-text-muted);
+}
+
+.note {
+  font-size: 12px;
 }
 
 .alerts,
@@ -1057,16 +1081,12 @@ section {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 8px;
 }
 
 .alerts li {
   --tone: var(--ui-info);
 
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
   padding: 6px 12px;
   border: 1px solid color-mix(in oklab, var(--tone) 35%, transparent);
   border-radius: var(--ui-radius-lg);
@@ -1082,9 +1102,16 @@ section {
   --tone: var(--ui-warning);
 }
 
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 .facts {
   display: grid;
-  grid-template-columns: minmax(9rem, max-content) 1fr;
+  grid-template-columns: minmax(8rem, max-content) 1fr;
   gap: 6px 16px;
   margin: 0;
 }
@@ -1100,14 +1127,17 @@ section {
 }
 
 .line {
-  display: block;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
 .block {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
   padding: 12px 16px;
   border: 1px solid var(--ui-border);
   border-radius: var(--ui-radius-lg);
@@ -1143,10 +1173,6 @@ section {
   border-bottom: 1px solid var(--ui-border);
 }
 
-.rows li.muted {
-  opacity: 0.6;
-}
-
 .stack {
   display: flex;
   flex-direction: column;
@@ -1169,7 +1195,7 @@ section {
 
 .orgs {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
   gap: 6px 16px;
 }
 
@@ -1192,15 +1218,15 @@ a:hover {
   text-decoration: underline;
 }
 
+code {
+  font-size: 12px;
+  color: var(--ui-text-muted);
+}
+
 .panel-tools {
   display: flex;
   justify-content: flex-end;
   margin-bottom: 8px;
-}
-
-.row-tools {
-  display: flex;
-  gap: 8px;
 }
 
 .low {
@@ -1223,10 +1249,6 @@ a:hover {
 .check-form :deep(.p-inputtext) {
   width: 100%;
   min-width: 0;
-}
-
-.found {
-  align-self: flex-end;
 }
 
 .programs-scroll {
@@ -1266,25 +1288,6 @@ a:hover {
   color: var(--ui-error);
 }
 
-@media (width <= 480px) {
-  .check-form {
-    grid-template-columns: minmax(0, 1fr) max-content;
-  }
-
-  .check-form label {
-    grid-column: 1 / -1;
-  }
-}
-
-/* Вкладки — сплошная область цвета страницы: узор фона не ложится под текст
-   вкладок и их содержимого. */
-:deep(.p-tabs) {
-  padding: 0 16px 16px;
-  border: 1px solid var(--ui-border);
-  border-radius: var(--ui-radius-lg);
-  background: var(--ui-bg);
-}
-
 :deep(.p-tablist-tab-list) {
   background: transparent;
   border-color: var(--ui-border);
@@ -1307,100 +1310,7 @@ a:hover {
   background: transparent;
 }
 
-:deep(.p-tag) {
-  --tone: var(--ui-info);
-
-  padding: 2px 8px;
-  border-radius: var(--ui-radius-md);
-  font-size: 12px;
-  line-height: 16px;
-  font-weight: 500;
-  white-space: nowrap;
-  background: color-mix(in oklab, var(--tone) 12%, var(--ui-bg));
-  color: var(--tone);
-}
-
-:deep(.p-tag-danger) {
-  --tone: var(--ui-error);
-}
-
-:deep(.p-tag-warn) {
-  --tone: var(--ui-warning);
-}
-
-:deep(.p-tag-success) {
-  --tone: var(--ui-success);
-}
-
-:deep(.p-tag-secondary) {
-  --tone: var(--ui-text-muted);
-}
-
-:deep(.p-button) {
-  height: 32px;
-  padding: 0 12px;
-  border: 1px solid var(--ui-primary);
-  border-radius: var(--ui-radius-md);
-  background: var(--ui-primary);
-  color: var(--ui-bg);
-  font-size: 14px;
-  font-weight: 500;
-}
-
-:deep(.p-button:not(:disabled):hover) {
-  background: var(--ui-primary-hover);
-  border-color: var(--ui-primary-hover);
-  color: var(--ui-bg);
-}
-
-:deep(.p-button.p-button-icon-only) {
-  width: 32px;
-  padding: 0;
-}
-
-:deep(.p-button.p-button-text),
-:deep(.p-button.p-button-outlined) {
-  background: transparent;
-  border-color: transparent;
-  color: var(--ui-text-muted);
-}
-
-:deep(.p-button.p-button-outlined) {
-  border-color: var(--ui-border);
-  background: var(--ui-bg);
-  color: var(--ui-text);
-}
-
-:deep(.p-button.p-button-text:not(:disabled):hover),
-:deep(.p-button.p-button-outlined:not(:disabled):hover) {
-  background: var(--ui-bg-panel-hover);
-  color: var(--ui-text);
-}
-
-:deep(.p-message) {
-  --tone: var(--ui-info);
-
-  margin: 0;
-  border: 1px solid color-mix(in oklab, var(--tone) 35%, transparent);
-  border-radius: var(--ui-radius-lg);
-  background: color-mix(in oklab, var(--tone) 12%, var(--ui-bg));
-  color: var(--tone);
-  font-size: 14px;
-}
-
-:deep(.p-message-error) {
-  --tone: var(--ui-error);
-}
-
-:deep(.p-message-warn) {
-  --tone: var(--ui-warning);
-}
-
-:deep(.p-message-content) {
-  padding: 10px 12px;
-}
-
-@media (width <= 900px) {
+@media (width <= 600px) {
   .facts {
     grid-template-columns: 1fr;
     gap: 2px;
@@ -1415,13 +1325,12 @@ a:hover {
     align-items: flex-start;
   }
 
-  /* «Подробнее» остаётся в строке повода, справа; длинный текст переносится сам. */
-  .alerts li {
-    flex-wrap: wrap;
+  .check-form {
+    grid-template-columns: minmax(0, 1fr) max-content;
   }
 
-  .alerts li :deep(.p-button) {
-    margin-left: auto;
+  .check-form label {
+    grid-column: 1 / -1;
   }
 }
 </style>

@@ -4,6 +4,9 @@ import { useSessionStore } from '../stores/session'
 /** Новая и сохранённая заявка — один экран: переход между ними его не пересоздаёт. */
 const RequestForm = () => import('../views/RequestFormView.vue')
 
+/** Список клиентов без открытой карточки: на месте панели ничего. */
+const Empty = { render: () => null }
+
 /** Только перечисленные параметры адреса: чужие старому экрану не переносим. */
 function pick(query: LocationQuery, ...names: string[]): LocationQuery {
   return Object.fromEntries(Object.entries(query).filter(([name]) => names.includes(name)))
@@ -13,14 +16,23 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     // Сводка и Находки слились в Клиентов: счётчики поводов и находки ЭДО
-    // живут там (?show=anomalies — находки списком), старые адреса ведут туда.
-    { path: '/', redirect: (to) => ({ name: 'clients', query: pick(to.query, 'q', 'show') }) },
+    // живут там (?filter=findings — находки списком), старые адреса ведут туда.
+    { path: '/', redirect: (to) => ({ name: 'clients', query: pick(to.query, 'q', 'show', 'filter') }) },
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue') },
-    { path: '/anomalies', redirect: (to) => ({ name: 'clients', query: { ...pick(to.query, 'q'), show: 'anomalies' } }) },
-    { path: '/clients', name: 'clients', component: () => import('../views/ClientsView.vue') },
+    { path: '/anomalies', redirect: (to) => ({ name: 'clients', query: { ...pick(to.query, 'q'), filter: 'findings' } }) },
+    // Карточка клиента — панель справа поверх списка: ключ — ИНН-КПП (domain.ts
+    // clientKey), фильтры списка под ней остаются в адресе.
+    {
+      path: '/clients',
+      component: () => import('../views/ClientsView.vue'),
+      children: [
+        { path: '', name: 'clients', component: Empty },
+        { path: ':key', name: 'client', component: () => import('../components/ClientCard.vue') },
+      ],
+    },
     // Биллинг, Абоненты и Реестр слились в Клиентов: старые ссылки ведут туда
     // же, поиск (?q=) и счётчик (?show=) — те же ключи.
-    { path: '/billing', redirect: (to) => ({ name: 'clients', query: pick(to.query, 'q', 'show') }) },
+    { path: '/billing', redirect: (to) => ({ name: 'clients', query: pick(to.query, 'q', 'show', 'filter') }) },
     { path: '/subscribers', redirect: (to) => ({ name: 'clients', query: pick(to.query, 'q') }) },
     { path: '/identifiers', redirect: (to) => ({ name: 'clients', query: pick(to.query, 'q') }) },
     {
@@ -31,8 +43,6 @@ const router = createRouter({
       beforeEnter: (to) => (to.query.inn ? { name: 'request-new', query: to.query } : true),
     },
     { path: '/requests/new', name: 'request-new', component: RequestForm },
-    // Карточка клиента: ключ — ИНН-КПП (domain.ts clientKey).
-    { path: '/clients/:key', name: 'client', component: () => import('../views/ClientCardView.vue') },
     { path: '/requests/:id(\\d+)', name: 'request', component: RequestForm },
     { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
     // Опечатка в адресе или устаревшая ссылка — не пустой экран, а главная.

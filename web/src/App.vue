@@ -42,7 +42,7 @@ const titles: Record<string, string> = {
   'request-new': 'Заявки',
   request: 'Заявки',
   settings: 'Настройки',
-  client: 'Карточка клиента',
+  client: 'Клиенты',
 }
 
 /** Пункт меню подсвечен и на вложенных адресах: /requests/new, /requests/12. */
@@ -283,6 +283,34 @@ small,
   font-size: 14px;
   font-weight: 600;
   color: var(--ui-text-highlighted);
+}
+
+/* Карточка клиента — панель справа поверх списка Клиентов. */
+.p-drawer.client-drawer {
+  border-left: 1px solid var(--ui-border);
+  background: var(--ui-bg);
+}
+
+.client-drawer .p-drawer-header {
+  padding: 12px 16px 0;
+}
+
+.client-drawer .p-drawer-title {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  color: var(--ui-text-highlighted);
+}
+
+.client-drawer .p-drawer-content {
+  padding: 8px 16px 16px;
+}
+
+/* Подсказки со списком (свежесть данных, поводы клиента) — построчно. */
+.p-tooltip .p-tooltip-text {
+  white-space: pre-line;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 /* ---- Каркас: боковое меню слева, колонка контента справа ---- */

@@ -184,7 +184,8 @@ func TestClientListOneRowPerOrganization(t *testing.T) {
 	rec := byKey[processorINN+"-"+processorKPP]
 	if len(rec.EDOIDs) != 2 || !rec.InBase || !rec.InBilling || rec.Used != 653 || rec.Limit == nil || *rec.Limit != 600 ||
 		!rec.OverLimit || rec.Amount != money.Amount(1_500_000).String() || rec.Anomalies != 1 || rec.Requests != 1 ||
-		rec.SubscriberName != "Переработка-абонент" || rec.ITSEnd == "" {
+		rec.SubscriberName != "Переработка-абонент" || rec.ITSEnd == "" ||
+		rec.Tariff != "1С-ЭДО. ЭПД-600(0): подп. ИТС №: 1" || rec.LastRequestAt == "" {
 		t.Errorf("центр переработки: %+v", rec)
 	}
 	if lone := byKey[loneINN]; lone.InBase || !lone.InBilling || !lone.LowRemainder || lone.SubscriberCodes[0] != "CL-900" {

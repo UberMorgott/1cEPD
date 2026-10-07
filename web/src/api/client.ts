@@ -707,6 +707,10 @@ export interface ClientListItem extends ClientRef {
   itsEnd?: string
   anomalies: number
   requests: number
+  /** «Тарифы ИТС» из реестра ЭДО или выгрузки ЭПД. */
+  tariff?: string
+  /** Когда последний раз меняли заявку на клиента. */
+  lastRequestAt?: string
 }
 
 export interface ClientList {

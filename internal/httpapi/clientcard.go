@@ -190,6 +190,10 @@ type clientListItem struct {
 	ITSEnd    string `json:"itsEnd,omitempty"`
 	Anomalies int    `json:"anomalies"`
 	Requests  int    `json:"requests"`
+	// Tariff — строка «Тарифы ИТС» клиента из реестра или выгрузки ЭПД.
+	Tariff string `json:"tariff,omitempty"`
+	// LastRequestAt — когда последний раз меняли заявку на клиента.
+	LastRequestAt string `json:"lastRequestAt,omitempty"`
 }
 
 // ClientList отдаёт реестр клиентов: одна строка — одна организация.
@@ -259,12 +263,17 @@ func (h *Registry) ClientList(w http.ResponseWriter, r *http.Request) {
 		for _, row := range r.rows {
 			if e := d.index.forRequisites(row.INN, row.KPP); e != nil && !seen[e] {
 				seen[e] = true
-				items[at[e]].Requests++
+				item := &items[at[e]]
+				item.Requests++
+				// RFC 3339 в UTC сравнивается как строка.
+				item.LastRequestAt = max(item.LastRequestAt, r.item.UpdatedAt)
 			}
 		}
 	}
+	tariffs := tariffsByClient(d)
 	for i := range items {
 		items[i].Amount = amounts[i].String()
+		items[i].Tariff = tariffs[items[i].Key]
 	}
 
 	response := map[string]any{"period": d.billing.Period, "clients": items}
@@ -562,6 +571,24 @@ func itsClientsOf(x *clientIndex, code string) []itsClientItem {
 		list = append(list, itsClientItem{INN: e.INN, KPP: e.KPP, ClientName: e.ClientName})
 	}
 	return list
+}
+
+// tariffsByClient — tariffsOf для всех клиентов разом: реестр клиентов не
+// перебирает идентификаторы заново на каждую строку.
+func tariffsByClient(d *clientData) map[string]string {
+	found := map[string]string{}
+	put := func(edoID, tariffs string) {
+		if e := d.index.byEDO[edoID]; e != nil && tariffs != "" && found[e.Key] == "" {
+			found[e.Key] = tariffs
+		}
+	}
+	for _, id := range d.ids {
+		put(id.EDOID, id.ITSTariffs)
+	}
+	for _, row := range d.imported {
+		put(row.EDOID, row.ITSTariffs)
+	}
+	return found
 }
 
 // tariffsOf — строка «Тарифы ИТС» клиента из реестра: по ней продление

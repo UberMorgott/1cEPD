@@ -14,13 +14,13 @@ import { useInfiniteRows } from '../composables/useInfiniteRows'
 import { useRefreshable } from '../composables/useRefreshable'
 
 /**
- * Находки ЭДО списком — бывший экран «Находки», теперь панель в Клиентах
- * (фильтр «Находки ЭДО»): связи идентификаторов, которые стоит проверить,
- * пометка «это нормально» и скрытые находки с возвратом. Поиск — общий с
- * Клиентами, приходит свойством.
+ * Находки ЭДО списком — то, что показывает счётчик «Находки ЭДО» в Клиентах
+ * (?filter=findings): связи идентификаторов, которые стоит проверить, пометка
+ * «это нормально» и скрытые находки с возвратом. Поиск — общий с Клиентами,
+ * приходит свойством; строка открывает карточку клиента (событие open).
  */
 const props = defineProps<{ search: string }>()
-const emit = defineEmits<{ 'clear-search': []; changed: [] }>()
+const emit = defineEmits<{ 'clear-search': []; changed: []; open: [key: string] }>()
 
 const items = ref<Anomaly[]>([])
 /** Режим: активные находки или скрытые — помеченные законными и погашенные топологией. */
@@ -89,13 +89,17 @@ async function restore(item: Anomaly) {
   }
 }
 
+function openClient({ data }: { data: Anomaly }) {
+  const key = clientKey(data.inn, data.kpp, data.edoId)
+  if (key) emit('open', key)
+}
+
 defineExpose({ reload: () => load(true) })
 </script>
 
 <template>
   <section class="findings">
     <header class="findings-head">
-      <strong>Находки ЭДО</strong>
       <Button
         :label="`Активные · ${active.length}`"
         size="small"
@@ -156,6 +160,7 @@ defineExpose({ reload: () => load(true) })
         :loading="loading"
         data-key="id"
         class="table"
+        @row-click="openClient"
       >
         <template #empty>
           <div
@@ -200,7 +205,6 @@ defineExpose({ reload: () => load(true) })
             <ClientSummary
               :name="data.clientName"
               :inn="data.inn"
-              :to="clientKey(data.inn, data.kpp, data.edoId)"
             />
           </template>
         </Column>
@@ -247,7 +251,7 @@ defineExpose({ reload: () => load(true) })
               size="small"
               severity="secondary"
               outlined
-              @click="ackTarget = data"
+              @click.stop="ackTarget = data"
             />
             <div
               v-else
@@ -264,7 +268,7 @@ defineExpose({ reload: () => load(true) })
                 severity="secondary"
                 outlined
                 :loading="restoreBusy === data.id"
-                @click="restore(data)"
+                @click.stop="restore(data)"
               />
             </div>
           </template>
@@ -287,10 +291,6 @@ defineExpose({ reload: () => load(true) })
   align-items: center;
   gap: 8px;
   color: var(--ui-text-highlighted);
-}
-
-.findings-head strong {
-  margin-right: 8px;
 }
 
 section {
@@ -388,6 +388,11 @@ code {
 
 :deep(.p-datatable-tbody > tr:hover) {
   background: var(--ui-bg-panel-hover);
+}
+
+/* Строка открывает карточку клиента. */
+:deep(.p-datatable-tbody > tr) {
+  cursor: pointer;
 }
 
 /* Статусы — тонированные пилюли вместо сплошной заливки. */
