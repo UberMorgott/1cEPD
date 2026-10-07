@@ -29,9 +29,7 @@ async function logout() {
 
 /** Пункты бокового меню: маршрут, подпись и иконка PrimeIcons. */
 const navItems = [
-  { to: '/', label: 'Сводка', icon: 'pi-home' },
   { to: '/clients', label: 'Клиенты', icon: 'pi-users' },
-  { to: '/anomalies', label: 'Находки', icon: 'pi-exclamation-triangle' },
   { to: '/requests', label: 'Заявки', icon: 'pi-inbox' },
   { to: '/settings', label: 'Настройки', icon: 'pi-cog' },
 ]
@@ -39,8 +37,6 @@ const navItems = [
 // Заголовок верхней панели: карта имени маршрута в подпись, чтобы не
 // заводить meta в роутере ради трёх строк.
 const titles: Record<string, string> = {
-  dashboard: 'Сводка',
-  anomalies: 'Находки',
   clients: 'Клиенты',
   requests: 'Заявки',
   'request-new': 'Заявки',

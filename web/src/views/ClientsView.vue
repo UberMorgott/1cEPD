@@ -1,27 +1,35 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Column from 'primevue/column'
+import InputNumber from 'primevue/inputnumber'
 import Message from 'primevue/message'
 import Tab from 'primevue/tab'
 import TabList from 'primevue/tablist'
 import Tabs from 'primevue/tabs'
 import Tag from 'primevue/tag'
 import ClientSummary from '../components/ClientSummary.vue'
+import FindingsPanel from '../components/FindingsPanel.vue'
 import InfiniteTable from '../components/InfiniteTable.vue'
+import MonthBars, { type MonthBar } from '../components/MonthBars.vue'
 import PageHeader from '../components/PageHeader.vue'
 import { useInfiniteRows } from '../composables/useInfiniteRows'
 import { useRefreshable } from '../composables/useRefreshable'
-import { api, type ClientList, type ClientListItem, type Dashboard } from '../api/client'
-import { savedExpiryDays, topicGroups, topicKeys, type Topic, type TopicGroup } from '../dashboard'
-import { money, monthLabel, moscowDate, plural, shortName, when } from '../format'
+import { api, type BillingHistory, type ClientList, type ClientListItem, type Dashboard } from '../api/client'
+import { saveExpiryDays, savedExpiryDays, topicGroups, topicKeys, type Topic, type TopicGroup } from '../dashboard'
+import { amount, money, monthLabel, moscowDate, plural, shortName, when } from '../format'
+import { useLiveStore } from '../stores/live'
 
 /**
- * Клиенты: одна строка — одна организация (ИНН+КПП), бывшие «Биллинг» и
- * «Абоненты» в одной таблице. Счётчики — те же поводы, что на Сводке: клик
- * оставляет в таблице их клиентов (?show=), абонент — фильтр (?sub=) или
- * группировка (?group=sub). Строка открывает карточку клиента.
+ * Клиенты — единственный рабочий экран: бывшие «Сводка», «Находки»,
+ * «Биллинг» и «Абоненты». Одна строка — одна организация (ИНН+КПП).
+ * Сверху — свежесть источников и счётчики поводов (бывшие плитки Сводки):
+ * клик оставляет в таблице их клиентов (?show=), «Есть проблемы»
+ * (?show=problems) — всех с любым поводом, «Находки ЭДО» (?show=anomalies)
+ * открывает и сами находки с пометкой «это нормально» и скрытыми.
+ * Абонент — фильтр (?sub=) или группировка (?group=sub). Строка открывает
+ * карточку клиента: его находки, договоры, заявка.
  *
  * Вкладки: «Наши» — клиенты 1С-ЭДО с нашими идентификаторами (последний биллинг
  * и отчёты трафика партнёрского API, плюс загруженная руками выгрузка «Детализация
@@ -36,19 +44,126 @@ type Row = ClientListItem & {
   topics: Topic[]
 }
 
+const live = useLiveStore()
+
 const list = ref<ClientList | null>(null)
 const summary = ref<Dashboard | null>(null)
+/** Окно напоминаний о продлении, дней: договоры и лицензии, кончающиеся за этот срок. */
+const expiryDays = ref(savedExpiryDays())
 
 const { loading, refreshing, error, refreshFailed, dataAsOf, load } = useRefreshable(
   async () => {
-    const [clients, dashboard] = await Promise.all([api.clients(), api.dashboard(savedExpiryDays())])
+    const [clients, dashboard] = await Promise.all([api.clients(), api.dashboard(expiryDays.value)])
     list.value = clients
     summary.value = dashboard
   },
   { failText: 'Не удалось загрузить клиентов.' },
 )
 
+watch(expiryDays, (days) => {
+  if (!Number.isInteger(days) || days < 1 || days > 366) return
+  saveExpiryDays(days)
+  void load(true)
+})
+
 const groups = computed(() => (summary.value ? topicGroups(summary.value) : null))
+
+/** Свежесть каждого источника: из чего собран экран и насколько это старо. */
+const sources = computed(() => {
+  const s = summary.value?.sources
+  if (!s) return []
+  const period = summary.value?.billing.period
+  return [
+    { label: period ? `биллинг ${monthLabel(period)}` : 'биллинг', at: s.billing },
+    { label: 'база абонентов', at: s.subscribers },
+    { label: 'договоры 1С:ИТС', at: s.its },
+    { label: 'трафик месяца', at: s.traffic },
+    { label: 'расход ЭПД', at: s.epdUsage },
+    { label: 'лицензии', at: s.licenses },
+  ]
+})
+
+/** Неотправленные заявки: черновики и выгруженные файлом — ссылка в Заявки. */
+const requestsCount = computed(() =>
+  summary.value ? summary.value.counts.drafts + summary.value.counts.exported : 0,
+)
+
+/** Срочные находки и скрытые, которые пора пересмотреть: подпись счётчика находок. */
+const urgent = computed(
+  () => (summary.value?.anomalies ?? []).filter((entry) => entry.item.confidence === 'high').length,
+)
+
+/** Подпись счётчика: то, что Сводка писала под числом плитки. */
+function chipTitle(group: TopicGroup): string {
+  const clients = `клиентов ${group.count}`
+  if (group.key === 'invoice' && summary.value && group.items.length) {
+    return `к выставлению ${money(summary.value.billing.totalDue)} за ${monthLabel(summary.value.billing.period)} · ${clients}`
+  }
+  if (group.key === 'anomalies') {
+    const review = summary.value?.counts.reviewDue
+    return `находок ${group.items.length}, срочных ${urgent.value} · ${clients}` +
+      (review ? ` · пора пересмотреть скрытых ${review}` : '')
+  }
+  return `${group.label}: ${clients}`
+}
+
+/** «Проверить в 1С» договоры ИТС: сервер сам не повторит проверку моложе 10 минут. */
+const itsRefreshing = ref(false)
+const itsError = ref('')
+
+async function refreshIts() {
+  itsRefreshing.value = true
+  itsError.value = ''
+  try {
+    await api.refreshItsContracts()
+    await load(true)
+  } catch (err) {
+    itsError.value = err instanceof Error ? err.message : 'Не удалось проверить договоры в 1С.'
+  } finally {
+    itsRefreshing.value = false
+  }
+}
+
+/** История биллинга за 12 закрытых месяцев: прошлые месяцы догружаются по одному в час. */
+const history = ref<BillingHistory | null>(null)
+
+async function loadHistory() {
+  try {
+    history.value = await api.billingHistory()
+  } catch {
+    // Без графика экран работает.
+    history.value = null
+  }
+}
+
+const monthStatusText: Record<string, string> = {
+  pending: 'ещё не загружен',
+  none: 'в 1С биллинга нет',
+  failed: '1С не отдала отчёт',
+}
+
+const historyLoaded = computed(() => (history.value?.months ?? []).filter((m) => m.status === 'ok'))
+
+const totalBars = computed<MonthBar[]>(() =>
+  (history.value?.months ?? []).map((month) => ({
+    key: month.period,
+    label: monthLabel(month.period),
+    value: month.status === 'ok' ? month.packets : null,
+    over: month.billable > 0,
+    note:
+      month.status === 'ok'
+        ? `сверх лимита ${month.billable}, к выставлению ${money(month.totalDue)}`
+        : monthStatusText[month.status],
+  })),
+)
+
+const historyDue = computed(() => {
+  const sum = historyLoaded.value.reduce((total, month) => total + (amount(month.totalDue) || 0), 0)
+  return money(sum.toFixed(2).replace('.', ','))
+})
+
+onMounted(loadHistory)
+watch(() => live.lastEvent, loadHistory)
 
 const rows = computed<Row[]>(() =>
   (list.value?.clients ?? []).map((client) => ({
@@ -91,12 +206,30 @@ function onTab(value: string | number) {
 }
 const grouped = computed(() => queryText('group') === 'sub')
 
+/** «Продление» — всегда: в нём окно напоминаний и проверка договоров в 1С. */
 const chips = computed(() =>
-  groups.value ? topicKeys.map((key) => groups.value![key]).filter((g) => g.count > 0 || g.key === active.value) : [],
+  groups.value
+    ? topicKeys
+      .map((key) => groups.value![key])
+      .filter((g) => g.count > 0 || g.key === active.value || g.key === 'renewal')
+    : [],
 )
 
-function toggleChip(key: Topic) {
-  setQuery('show', active.value === key ? '' : key)
+/** ?show=problems — клиенты с любым поводом из счётчиков. */
+const problemsOnly = computed(() => queryText('show') === 'problems')
+const problemCount = computed(() => tabRows.value.filter((row) => row.topics.length).length)
+
+function toggleChip(key: Topic | 'problems') {
+  setQuery('show', queryText('show') === key ? '' : key)
+}
+
+const findingsPanel = ref<{ reload: () => Promise<void> } | null>(null)
+
+/** Кнопка обновления: клиенты, поводы, находки и история расхода разом. */
+function refreshAll() {
+  void load(true)
+  void findingsPanel.value?.reload()
+  void loadHistory()
 }
 
 const subscriberNames = computed(() => {
@@ -112,6 +245,7 @@ const visible = computed<Row[]>(() => {
   const topic = activeGroup.value
   const filtered = tabRows.value.filter((row) => {
     if (topic && !topic.keys.has(row.key)) return false
+    if (problemsOnly.value && !row.topics.length) return false
     if (subscriber.value && !row.subscriberCodes.includes(subscriber.value)) return false
     if (!query) return true
     return [row.clientName, row.inn, row.kpp, row.subscriberName, ...row.logins, ...row.edoIds, ...row.subscriberCodes]
@@ -129,7 +263,9 @@ const visible = computed<Row[]>(() => {
 })
 
 /** Лента вместо страниц: порции дорисовываются при прокрутке, фильтры начинают заново. */
-const feed = useInfiniteRows(() => visible.value, { resetOn: [search, active, subscriber, grouped, tab] })
+const feed = useInfiniteRows(() => visible.value, {
+  resetOn: [search, active, problemsOnly, subscriber, grouped, tab],
+})
 
 // Группировка держит свой порядок строк: сортировка из шапки его бы разорвала.
 watch(grouped, (on) => {
@@ -217,7 +353,7 @@ const tagSeverity: Record<TopicGroup['tone'], string> = {
       :data-as-of="dataAsOf"
       :refresh-failed="refreshFailed"
       :error="error"
-      @refresh="load(true)"
+      @refresh="refreshAll"
     >
       <template #meta>
         <small
@@ -286,6 +422,20 @@ const tagSeverity: Record<TopicGroup['tone'], string> = {
     </Message>
 
     <template v-if="!error">
+      <!-- Свежесть источников — под шапкой, а не в ней: липкая шапка из шести
+           строк на телефоне закрывала бы треть экрана. -->
+      <p
+        v-if="sources.length"
+        class="sources"
+      >
+        <span>Данные:</span>
+        <span
+          v-for="item in sources"
+          :key="item.label"
+          :class="{ never: !item.at }"
+        >{{ item.label }} — {{ item.at ? when(item.at) : 'ещё не было' }}</span>
+      </p>
+
       <div class="tabs-row">
         <Tabs
           :value="tab"
@@ -308,21 +458,76 @@ const tagSeverity: Record<TopicGroup['tone'], string> = {
         aria-label="Кому что сделать"
       >
         <button
+          v-if="groups"
+          type="button"
+          class="counter problems"
+          :class="{ active: problemsOnly }"
+          :aria-pressed="problemsOnly"
+          title="Клиенты с любым поводом из счётчиков"
+          @click="toggleChip('problems')"
+        >
+          <span>Есть проблемы</span>
+          <strong>{{ problemCount }}</strong>
+        </button>
+        <button
           v-for="chip in chips"
           :key="chip.key"
           type="button"
           class="counter"
           :class="[chip.tone, { active: active === chip.key }]"
           :aria-pressed="active === chip.key"
+          :title="chipTitle(chip)"
           @click="toggleChip(chip.key)"
         >
           <span>{{ chip.label }}</span>
           <strong>{{ chip.count }}</strong>
         </button>
+        <RouterLink
+          v-if="requestsCount"
+          :to="{ name: 'requests' }"
+          class="counter info"
+          :title="`черновиков ${summary?.counts.drafts ?? 0} · выгружено файлом ${summary?.counts.exported ?? 0}`"
+        >
+          <span>Заявки не отправлены</span>
+          <strong>{{ requestsCount }}</strong>
+          <i class="pi pi-arrow-right" />
+        </RouterLink>
         <span
           v-if="groups && !chips.length"
           class="quiet"
         >Счетов, лимитов, продлений и подсказок сейчас нет.</span>
+      </div>
+
+      <!-- Окно напоминаний и проверка договоров — при счётчике «Продление». -->
+      <div
+        v-if="active === 'renewal'"
+        class="filters"
+      >
+        <label class="window">
+          договоры и лицензии, кончающиеся за
+          <InputNumber
+            v-model="expiryDays"
+            :min="1"
+            :max="366"
+            :use-grouping="false"
+            input-class="days"
+            aria-label="Окно напоминаний, дней"
+          />
+          дн.
+        </label>
+        <Button
+          label="Проверить в 1С"
+          icon="pi pi-refresh"
+          size="small"
+          outlined
+          :loading="itsRefreshing"
+          :title="summary?.sources.its ? `Проверено ${when(summary.sources.its)}` : 'Договоры ещё не проверялись'"
+          @click="refreshIts"
+        />
+        <small
+          v-if="itsError"
+          class="late"
+        >{{ itsError }}</small>
       </div>
 
       <div class="filters">
@@ -359,21 +564,73 @@ const tagSeverity: Record<TopicGroup['tone'], string> = {
         </template>
       </div>
 
-      <div
-        v-if="activeGroup?.unmatched.length"
+      <!-- Находки ЭДО списком: пометка «это нормально», скрытые и возврат. -->
+      <FindingsPanel
+        v-if="active === 'anomalies'"
+        ref="findingsPanel"
+        :search="search"
+        @clear-search="search = ''"
+        @changed="load(true)"
+      />
+
+      <!-- Подробности повода — то, что Сводка писала на плитке: кто и что именно. -->
+      <details
+        v-else-if="activeGroup?.items.length"
         class="unmatched"
+        :open="activeGroup.items.length <= 6"
       >
-        <small>Без карточки клиента — у абонента нет организаций в базе и идентификаторов ЭДО:</small>
+        <summary>
+          Подробности: {{ activeGroup.items.length }}
+          <template v-if="activeGroup.key === 'invoice' && summary">
+            · к выставлению {{ money(summary.billing.totalDue) }} за {{ monthLabel(summary.billing.period) }}
+          </template>
+        </summary>
         <ul>
           <li
-            v-for="item in activeGroup.unmatched"
+            v-for="item in activeGroup.items"
             :key="item.id"
           >
-            <strong :title="item.name">{{ shortName(item.name) }}</strong> —
+            <RouterLink
+              v-if="item.clients[0]"
+              :to="{ name: 'client', params: { key: item.clients[0].key }, query: { tab: activeGroup.tab } }"
+              :title="`Карточка клиента: ${item.clients[0].clientName}`"
+            >
+              {{ shortName(item.clients[0].clientName) || item.clients[0].key }}
+            </RouterLink>
+            <strong
+              v-else
+              :title="item.name"
+            >{{ shortName(item.name) }} <small>(без карточки клиента)</small></strong>
+            <small
+              v-if="item.clients.length > 1"
+              :title="item.clients.slice(1).map((client) => shortName(client.clientName)).join(', ')"
+            > и ещё {{ item.clients.length - 1 }}</small>
+            —
             <span :class="{ late: item.late }">{{ item.text }}</span>
           </li>
         </ul>
-      </div>
+      </details>
+
+      <details
+        v-if="history"
+        class="trend"
+      >
+        <summary>
+          Расход по месяцам, пакетов, все клиенты
+          <small>загружено {{ historyLoaded.length }} из {{ history.months.length }} мес.</small>
+        </summary>
+        <p
+          v-if="historyLoaded.length"
+          class="trend-totals"
+        >
+          выставлено за загруженные месяцы {{ historyDue }}
+        </p>
+        <MonthBars
+          :bars="totalBars"
+          unit="пакетов"
+          title="Пакеты документов ЭДО по месяцам, все клиенты"
+        />
+      </details>
 
       <InfiniteTable
         :feed="feed"
@@ -546,6 +803,89 @@ section {
   color: var(--ui-text);
   font-size: 14px;
   line-height: 20px;
+}
+
+/* Свежесть источников — бывшая строка Сводки: своя плотная подложка, чтобы
+   узор фона не ложился под текст. */
+.sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius-lg);
+  background: var(--ui-bg);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ui-text-muted);
+}
+
+.sources .never {
+  color: var(--ui-warning);
+}
+
+.window {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ui-text-muted);
+}
+
+.window :deep(.days) {
+  width: 4.5rem;
+  text-align: right;
+}
+
+.trend {
+  padding: 12px 16px;
+  border-radius: var(--ui-radius-lg);
+  border: 1px solid var(--ui-border);
+  background: var(--ui-bg-panel);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ui-text-dimmed);
+}
+
+.trend summary,
+.unmatched summary {
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--ui-text);
+}
+
+.trend summary small {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--ui-text-muted);
+}
+
+.trend-totals {
+  margin: 8px 0;
+  color: var(--ui-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.unmatched a {
+  color: var(--ui-text-highlighted);
+}
+
+a.counter {
+  align-items: center;
+  text-decoration: none;
+}
+
+a.counter .pi {
+  font-size: 12px;
+  color: var(--ui-text-muted);
+}
+
+.counter.problems {
+  --tone: var(--ui-text-muted);
 }
 
 .tabs-row {

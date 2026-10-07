@@ -824,9 +824,9 @@ const title = computed(() => {
             <div class="panel-tools">
               <RouterLink
                 v-if="anomalyQuery"
-                :to="{ name: 'anomalies', query: { q: anomalyQuery } }"
+                :to="{ name: 'clients', query: { show: 'anomalies', q: anomalyQuery } }"
               >
-                Открыть в «Находках»
+                Все находки списком
               </RouterLink>
             </div>
             <Message

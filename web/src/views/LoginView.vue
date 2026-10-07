@@ -14,7 +14,7 @@ const password = ref('')
 
 async function submit() {
   if (await session.login(login.value, password.value)) {
-    await router.push({ name: 'dashboard' })
+    await router.push({ name: 'clients' })
   }
 }
 </script>

@@ -12,9 +12,11 @@ function pick(query: LocationQuery, ...names: string[]): LocationQuery {
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', name: 'dashboard', component: () => import('../views/DashboardView.vue') },
+    // Сводка и Находки слились в Клиентов: счётчики поводов и находки ЭДО
+    // живут там (?show=anomalies — находки списком), старые адреса ведут туда.
+    { path: '/', redirect: (to) => ({ name: 'clients', query: pick(to.query, 'q', 'show') }) },
     { path: '/login', name: 'login', component: () => import('../views/LoginView.vue') },
-    { path: '/anomalies', name: 'anomalies', component: () => import('../views/AnomaliesView.vue') },
+    { path: '/anomalies', redirect: (to) => ({ name: 'clients', query: { ...pick(to.query, 'q'), show: 'anomalies' } }) },
     { path: '/clients', name: 'clients', component: () => import('../views/ClientsView.vue') },
     // Биллинг, Абоненты и Реестр слились в Клиентов: старые ссылки ведут туда
     // же, поиск (?q=) и счётчик (?show=) — те же ключи.
@@ -44,7 +46,7 @@ router.beforeEach((to) => {
     return { name: 'login' }
   }
   if (to.name === 'login' && session.authenticated) {
-    return { name: 'dashboard' }
+    return { name: 'clients' }
   }
   return true
 })
