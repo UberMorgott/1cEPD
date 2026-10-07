@@ -15,8 +15,10 @@ CREATE TABLE settings (
     updated_at        INTEGER NOT NULL
 );
 -- mail_to по умолчанию — робот 1С, единственный штатный получатель формы (docs/spec:282).
+-- SMTP-сервера по умолчанию нет: сервис ходит в сеть только к 1С и GitHub,
+-- почтовый сервер пользователь указывает сам.
 INSERT INTO settings (id, smtp_host, smtp_port, mail_to, updated_at)
-VALUES (1, 'smtp.yandex.ru', 465, '["itsrobot@1c.ru"]', 0);
+VALUES (1, '', 465, '["itsrobot@1c.ru"]', 0);
 
 -- Отметка об отправке письма живёт рядом с отметкой о выгрузке файла.
 ALTER TABLE its_requests ADD COLUMN sent_at INTEGER;

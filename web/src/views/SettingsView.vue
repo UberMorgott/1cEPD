@@ -10,7 +10,7 @@ import { api, type ItsSender, type Settings } from '../api/client'
 import { versionLabel } from '../update'
 
 const form = ref<Settings>({
-  smtpHost: 'smtp.yandex.ru',
+  smtpHost: '',
   smtpPort: 465,
   smtpLogin: '',
   smtpPasswordSet: false,
@@ -159,7 +159,7 @@ onMounted(load)
         <label>SMTP-хост
           <InputText
             v-model="form.smtpHost"
-            placeholder="smtp.yandex.ru"
+            placeholder="smtp.example.ru"
           />
         </label>
         <!-- Не <label>: щелчок по label переотправляется в Select и тут же закрывает список. -->
@@ -287,16 +287,8 @@ onMounted(load)
         </p>
         <p class="fixed">
           Выпустить:
-          <a
-            href="https://id.yandex.ru/security/app-passwords"
-            target="_blank"
-            rel="noopener noreferrer"
-          >Яндекс ID → Пароли приложений</a>, тип «Почта». Как это устроено —
-          <a
-            href="https://yandex.ru/support/id/ru/authorization/app-passwords"
-            target="_blank"
-            rel="noopener noreferrer"
-          >справка Яндекса</a>.
+          Яндекс ID → «Пароли приложений», тип «Почта». Как это устроено —
+          в справке Яндекса, раздел «Пароли приложений».
         </p>
         <p class="fixed">
           В настройках ящика включить «Разрешить доступ к почтовому ящику с помощью

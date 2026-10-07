@@ -38,8 +38,15 @@ type Config struct {
 	To       []string
 }
 
+// ErrNoServer — SMTP-сервер не указан. Сервера по умолчанию нет намеренно:
+// без явной настройки отправщик в сеть не ходит.
+var ErrNoServer = errors.New("почтовый сервер не настроен")
+
 // Send отправляет письмо. Пустое attachName означает письмо без вложения.
 func Send(ctx context.Context, cfg Config, subject, body, attachName string, attach []byte) error {
+	if strings.TrimSpace(cfg.Host) == "" {
+		return ErrNoServer
+	}
 	if len(cfg.To) == 0 {
 		return errors.New("не указан ни один получатель")
 	}

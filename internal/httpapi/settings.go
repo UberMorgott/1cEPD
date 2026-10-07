@@ -212,7 +212,10 @@ func mailConfig(ctx context.Context, store *settings.Store) (mailer.Config, erro
 	if err != nil {
 		return mailer.Config{}, err
 	}
-	if current.SMTPHost == "" || current.SMTPLogin == "" || current.SMTPFrom == "" ||
+	if strings.TrimSpace(current.SMTPHost) == "" {
+		return mailer.Config{}, mailer.ErrNoServer
+	}
+	if current.SMTPLogin == "" || current.SMTPFrom == "" ||
 		password == "" || len(current.MailTo) == 0 {
 		return mailer.Config{}, errMailNotConfigured
 	}
@@ -223,6 +226,11 @@ func mailConfig(ctx context.Context, store *settings.Store) (mailer.Config, erro
 }
 
 func writeMailConfigError(w http.ResponseWriter, err error) {
+	if errors.Is(err, mailer.ErrNoServer) {
+		writeError(w, http.StatusBadRequest, "not_configured",
+			"Почтовый сервер не настроен: укажите SMTP-хост в «Настройках».")
+		return
+	}
 	if errors.Is(err, errMailNotConfigured) {
 		writeError(w, http.StatusBadRequest, "not_configured",
 			"Почта не настроена: заполните сервер, логин, пароль, адрес отправителя и получателей.")
