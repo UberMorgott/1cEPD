@@ -32,6 +32,7 @@ import {
   type TopicGroup,
 } from '../dashboard'
 import { validInn } from '../domain'
+import { findingsTally } from '../findingsTally'
 import { amount, formatDate, money, monthLabel, plural, when } from '../format'
 import { useLiveStore } from '../stores/live'
 
@@ -188,9 +189,15 @@ function topicCount(topic: Topic): number {
 }
 
 const actionCount = computed(() => scopeRows.value.filter((row) => row.problems.length).length)
-const findingsCount = computed(() => summary.value?.anomalies.length ?? 0)
-const urgentFindings = computed(
-  () => (summary.value?.anomalies ?? []).filter((entry) => entry.item.confidence === 'high').length,
+/**
+ * Находки ЭДО — как и прочие счётчики, в клиентах; сами находки — вторым планом.
+ * Без охвата «Наши / Прочие»: список находок по клику тоже показывает все.
+ */
+const findings = computed(() => findingsTally(summary.value?.anomalies ?? []))
+const findingsText = computed(
+  () =>
+    `${findings.value.clients} ${plural(findings.value.clients, 'клиент', 'клиента', 'клиентов')} · ` +
+    `${findings.value.findings} ${plural(findings.value.findings, 'находка', 'находки', 'находок')}`,
 )
 
 interface Counter {
@@ -232,9 +239,9 @@ const counters = computed<Counter[]>(() => {
     {
       key: 'findings',
       label: 'Находки ЭДО',
-      count: findingsCount.value,
+      count: findings.value.clients,
       tone: 'danger',
-      hint: `Активных находок ${findingsCount.value}, срочных ${urgentFindings.value}` +
+      hint: `Клиенты с активными находками: ${findingsText.value}, срочных ${findings.value.urgent}` +
         (s.counts.reviewDue ? `; скрытых пора пересмотреть: ${s.counts.reviewDue}` : ''),
     },
   ]
@@ -821,6 +828,13 @@ watch(
       </div>
 
       <!-- Находки ЭДО — по одной строке на находку: у каждой своё действие. -->
+      <p
+        v-if="filter === 'findings' && summary"
+        class="meta-line findings-tally"
+        data-testid="findings-tally"
+      >
+        {{ findingsText }}{{ findings.urgent ? ` · срочных ${findings.urgent}` : '' }}
+      </p>
       <FindingsPanel
         v-if="filter === 'findings'"
         ref="findingsPanel"
