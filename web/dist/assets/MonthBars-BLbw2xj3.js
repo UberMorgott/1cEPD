@@ -1,4 +1,4 @@
-import{$ as e,F as t,H as n,M as r,P as i,St as a,T as o,Tt as s,U as c,_ as l,d as u,f as d,g as f,it as p,l as m,n as h,o as g,p as _,u as v,v as y,wt as b}from"./client-Bfd28sF8.js";import{i as x,n as S,pt as C,u as w,x as T}from"./index-BN9JGpiK.js";import{i as E,t as D}from"./message-tFNVWxRU.js";import{t as O}from"./textarea-GnMksRe2.js";var k=T.extend({name:`toggleswitch`,style:`
+import{$ as e,F as t,H as n,M as r,P as i,St as a,T as o,Tt as s,U as c,_ as l,d as u,f as d,g as f,it as p,l as m,n as h,o as g,p as _,u as v,v as y,wt as b}from"./client-JgoGY2Lg.js";import{i as x,n as S,pt as C,u as w,x as T}from"./index-swRijxKI.js";import{i as E,t as D}from"./message-eMYM0UmV.js";import{t as O}from"./textarea-CZ-d7j6Y.js";var k=T.extend({name:`toggleswitch`,style:`
     .p-toggleswitch {
         display: inline-block;
         width: dt('toggleswitch.width');
