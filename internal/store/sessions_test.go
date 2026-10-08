@@ -116,3 +116,79 @@ func TestPurgeExpiredRemovesOnlyStale(t *testing.T) {
 		t.Error("живая сессия была удалена")
 	}
 }
+
+func sessionExpiry(t *testing.T, s *Sessions, token string) int64 {
+	t.Helper()
+	var exp int64
+	if err := s.db.QueryRowContext(context.Background(),
+		`SELECT expires_at FROM sessions WHERE token_hash = ?`, hashToken(token)).Scan(&exp); err != nil {
+		t.Fatalf("expires_at: %v", err)
+	}
+	return exp
+}
+
+func TestExtendSlidesExpiry(t *testing.T) {
+	s := testSessions(t)
+	ctx := context.Background()
+
+	// До конца 30 минут из часа: продление уже положено.
+	token, err := s.Create(ctx, 30*time.Minute, "", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	ok, extended, err := s.Extend(ctx, token, time.Hour, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("Extend: %v", err)
+	}
+	if !ok || !extended {
+		t.Fatalf("ok=%v extended=%v, ожидали продление", ok, extended)
+	}
+	if got, want := sessionExpiry(t, s, token), time.Now().Add(time.Hour).Unix(); got < want-5 || got > want+5 {
+		t.Errorf("expires_at = %d, ожидали около %d", got, want)
+	}
+}
+
+func TestExtendThrottlesWrites(t *testing.T) {
+	s := testSessions(t)
+	ctx := context.Background()
+
+	// Сессия только что выдана на час: следующие 10 минут в базу не пишем.
+	token, err := s.Create(ctx, time.Hour, "", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	before := sessionExpiry(t, s, token)
+	ok, extended, err := s.Extend(ctx, token, time.Hour, 10*time.Minute)
+	if err != nil {
+		t.Fatalf("Extend: %v", err)
+	}
+	if !ok || extended {
+		t.Fatalf("ok=%v extended=%v, ожидали действующую сессию без записи", ok, extended)
+	}
+	if after := sessionExpiry(t, s, token); after != before {
+		t.Errorf("expires_at изменился: %d -> %d", before, after)
+	}
+}
+
+func TestExtendRejectsExpiredAndUnknown(t *testing.T) {
+	s := testSessions(t)
+	ctx := context.Background()
+
+	token, err := s.Create(ctx, -time.Minute, "", "")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, tok := range []string{token, "не существует"} {
+		ok, extended, err := s.Extend(ctx, tok, time.Hour, 10*time.Minute)
+		if err != nil {
+			t.Fatalf("Extend: %v", err)
+		}
+		if ok || extended {
+			t.Errorf("токен %q: ok=%v extended=%v, ожидали отказ", tok, ok, extended)
+		}
+	}
+	// Истёкшая сессия не воскресает.
+	if exp := sessionExpiry(t, s, token); exp > time.Now().Unix() {
+		t.Errorf("истёкшая сессия продлена до %d", exp)
+	}
+}

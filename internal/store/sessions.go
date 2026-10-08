@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -55,6 +56,40 @@ func (s *Sessions) Validate(ctx context.Context, token string) (bool, error) {
 		return false, fmt.Errorf("store: не проверить сессию: %w", err)
 	}
 	return time.Now().UTC().Unix() < expiresAt, nil
+}
+
+// Extend проверяет сессию и сдвигает её срок на now+ttl (скользящий срок).
+// Чтобы не писать в базу на каждый запрос, срок сдвигается, только когда до
+// конца осталось меньше ttl-every, то есть не чаще раза в every.
+// ok — сессия действует; extended — срок только что сдвинут, и cookie пора
+// перевыпустить. Ошибка возвращается только при сбое базы.
+func (s *Sessions) Extend(ctx context.Context, token string, ttl, every time.Duration) (ok, extended bool, err error) {
+	hash := hashToken(token)
+	var expiresAt int64
+	err = s.db.QueryRowContext(ctx,
+		`SELECT expires_at FROM sessions WHERE token_hash = ?`, hash,
+	).Scan(&expiresAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, fmt.Errorf("store: не проверить сессию: %w", err)
+	}
+	now := time.Now().UTC()
+	if now.Unix() >= expiresAt {
+		return false, false, nil
+	}
+	if time.Unix(expiresAt, 0).Sub(now) >= ttl-every {
+		return true, false, nil
+	}
+	_, err = s.db.ExecContext(ctx,
+		`UPDATE sessions SET expires_at = ? WHERE token_hash = ? AND expires_at > ?`,
+		now.Add(ttl).Unix(), hash, now.Unix(),
+	)
+	if err != nil {
+		return false, false, fmt.Errorf("store: не продлить сессию: %w", err)
+	}
+	return true, true, nil
 }
 
 // Delete завершает сессию.

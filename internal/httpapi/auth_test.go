@@ -282,3 +282,49 @@ func TestRequireSessionAllowsValidCookie(t *testing.T) {
 		t.Errorf("логин сессии %q, ожидали логин из настроек", login)
 	}
 }
+
+func TestRequireSessionSlidesCookie(t *testing.T) {
+	auth := testAuth(t) // ttl час, продление не чаще раза в 6 минут
+
+	cases := []struct {
+		name       string
+		left       time.Duration
+		wantCookie bool
+	}{
+		{"свежая сессия не перевыпускается", time.Hour, false},
+		{"сессия на исходе продлевается", 20 * time.Minute, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			token, err := auth.sessions.Create(context.Background(), tc.left, "", "")
+			if err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			handler := auth.RequireSession(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/whatever", nil)
+			//nolint:gosec // cookie уходит в запросе: атрибуты здесь бессмысленны
+			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			var got *http.Cookie
+			for _, c := range rec.Result().Cookies() {
+				if c.Name == sessionCookieName {
+					got = c
+				}
+			}
+			if !tc.wantCookie {
+				if got != nil {
+					t.Errorf("cookie перевыпущена без нужды: %v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("cookie не перевыпущена после продления")
+			}
+			if got.Value != token || got.MaxAge != int(time.Hour.Seconds()) || !got.HttpOnly {
+				t.Errorf("cookie %+v, ожидали тот же токен с Max-Age=3600", got)
+			}
+		})
+	}
+}

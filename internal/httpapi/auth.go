@@ -154,7 +154,7 @@ func (a *Auth) RequireSession(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Требуется вход.")
 			return
 		}
-		ok, err := a.sessions.Validate(r.Context(), cookie.Value)
+		ok, extended, err := a.sessions.Extend(r.Context(), cookie.Value, a.ttl, sessionRefreshEvery(a.ttl))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "internal", "Не удалось проверить сессию.")
 			return
@@ -163,8 +163,19 @@ func (a *Auth) RequireSession(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "Сессия истекла, войдите заново.")
 			return
 		}
+		if extended {
+			// Срок в базе сдвинут — cookie живёт столько же, иначе браузер
+			// выбросил бы её раньше, чем истечёт сессия.
+			setSessionCookie(w, cookie.Value, a.cookieSecure, int(a.ttl.Seconds()))
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionLoginKey{}, a.login)))
 	})
+}
+
+// sessionRefreshEvery — как часто активная сессия продлевается: раз в 10 минут,
+// а при коротком сроке — раз в десятую его часть, чтобы продление вообще успевало.
+func sessionRefreshEvery(ttl time.Duration) time.Duration {
+	return min(10*time.Minute, ttl/10)
 }
 
 type sessionLoginKey struct{}

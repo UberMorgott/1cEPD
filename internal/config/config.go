@@ -60,7 +60,7 @@ func Load(get Getter) (Config, error) {
 	}
 	cfg.AppPasswordHash = hash
 
-	ttl := orDefault(get("SESSION_TTL"), "12h")
+	ttl := orDefault(get("SESSION_TTL"), "720h")
 	parsed, err := time.ParseDuration(ttl)
 	if err != nil {
 		return Config{}, fmt.Errorf("SESSION_TTL=%q: %w", ttl, err)

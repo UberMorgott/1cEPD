@@ -83,8 +83,8 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("не ожидали ошибку: %v", err)
 	}
-	if cfg.SessionTTL != 12*time.Hour {
-		t.Errorf("SessionTTL = %v, ожидали 12h", cfg.SessionTTL)
+	if cfg.SessionTTL != 720*time.Hour {
+		t.Errorf("SessionTTL = %v, ожидали 720h", cfg.SessionTTL)
 	}
 	if cfg.DBPath != "./data/app.db" {
 		t.Errorf("DBPath = %q, ожидали ./data/app.db", cfg.DBPath)
